@@ -87,6 +87,13 @@ python3 host_client.py --spawn ./target/aarch64-apple-darwin/debug/jsonrpc-gpio
 # Real ESP32-S3 hardware (stdlib only):
 python3 host_client.py --port /dev/cu.usbmodemXXXX --baud 115200
 
+# Drive / read GPIO pins (config -> write -> read; device retains config):
+python3 host_client.py --port /dev/cu.usbmodemXXXX --config 45,output
+python3 host_client.py --port /dev/cu.usbmodemXXXX --write 45,1
+python3 host_client.py --port /dev/cu.usbmodemXXXX --read 45      # -> gpio_read(pin=45) -> 1
+# (`mode` = input | output | input_pullup; reads report the real electrical
+#  state — note GPIO45 is a strapping pin with an external pull-down on this board.)
+
 # Control the on-board LED directly:
 python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,16,0   # green
 python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,0,0    # off

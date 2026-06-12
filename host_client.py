@@ -245,6 +245,13 @@ def main() -> int:
     ap.add_argument("--duration", type=float, default=5.0, help="seconds per full color wheel for --rainbow (default 5.0)")
     ap.add_argument("--brightness", type=int, default=40, help="max channel brightness 0-255 for --rainbow (default 40)")
     ap.add_argument("--count", type=int, default=None, help="number of blinks/rainbow cycles (default: until Ctrl-C)")
+    ap.add_argument(
+        "--config",
+        metavar="PIN,MODE",
+        help="configure a GPIO pin and exit; MODE = input|output|input_pullup, e.g. --config 45,input_pullup",
+    )
+    ap.add_argument("--write", metavar="PIN,LEVEL", help="write a GPIO pin level (0/1) and exit, e.g. --write 45,1")
+    ap.add_argument("--read", metavar="PIN", type=int, help="read a GPIO pin's level and exit")
     args = ap.parse_args()
 
     if args.spawn:
@@ -277,6 +284,20 @@ def main() -> int:
             r, g, b = (int(x) for x in args.led.split(","))
             client.led_set(r, g, b)
             print(f"led_set({r}, {g}, {b}) -> ok")
+            return 0
+        if args.config is not None:
+            pin_s, mode = args.config.split(",")
+            client.gpio_config(int(pin_s), mode.strip())
+            print(f"gpio_config(pin={int(pin_s)}, mode={mode.strip()}) -> ok")
+            return 0
+        if args.write is not None:
+            pin_s, level_s = args.write.split(",")
+            client.gpio_write(int(pin_s), int(level_s))
+            print(f"gpio_write(pin={int(pin_s)}, level={int(level_s)}) -> ok")
+            return 0
+        if args.read is not None:
+            level = client.gpio_read(args.read)
+            print(f"gpio_read(pin={args.read}) -> {level}")
             return 0
         print("running GPIO RPC validation...")
         run_validation(client)
