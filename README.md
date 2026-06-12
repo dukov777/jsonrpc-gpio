@@ -89,8 +89,12 @@ python3 host_client.py --port /dev/tty.usbmodemXXXX --baud 115200
 The ESP32-S3 USB Serial/JTAG transport (`transport::s3`) is a documented stub.
 It is the start of a separate hardware milestone — see the module docs in
 `src/transport/s3.rs` for the required finite read tick / finite write timeout
-and the host-disconnect tests that must come first. The device build of this
-stub has not yet been run.
+and the host-disconnect tests that must come first.
+
+The full crate (including this stub and the ESP-IDF deps) **cross-compiles for
+the ESP32-S3** — `cargo build-s3` produces a Xtensa firmware ELF. The stub's
+methods are `todo!()`, so flashing it will panic at the transport step until
+the milestone implements them.
 
 [`embedded_io::Read`]: https://docs.rs/embedded-io
 [`embedded_io::Write`]: https://docs.rs/embedded-io

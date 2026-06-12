@@ -58,6 +58,10 @@ impl core::fmt::Display for S3Error {
     }
 }
 
+// Under embedded-io's `std` feature (on for the esp-idf std target),
+// `embedded_io::Error` requires `std::error::Error` as a supertrait.
+impl std::error::Error for S3Error {}
+
 impl embedded_io::Error for S3Error {
     fn kind(&self) -> ErrorKind {
         self.kind
