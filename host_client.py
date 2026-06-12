@@ -24,6 +24,7 @@ Exit code is 0 on success, 1 on any mismatch/timeout — so CI can gate on it.
 from __future__ import annotations
 
 import argparse
+import colorsys
 import json
 import os
 import pty
@@ -181,6 +182,22 @@ class Client:
             time.sleep(period)
             n += 1
 
+    def rainbow(self, duration: float = 5.0, brightness: int = 40, cycles=None) -> None:
+        """Sweep the LED smoothly through the full hue wheel. Each cycle takes
+        `duration` seconds (driven by wall-clock, so timing holds regardless of
+        serial round-trip latency). `cycles=None` runs until interrupted."""
+        value = max(0, min(255, brightness)) / 255.0
+        n = 0
+        while cycles is None or n < cycles:
+            start = time.monotonic()
+            while True:
+                elapsed = time.monotonic() - start
+                if elapsed >= duration:
+                    break
+                r, g, b = colorsys.hsv_to_rgb(elapsed / duration, 1.0, value)
+                self.led_set(int(r * 255), int(g * 255), int(b * 255))
+            n += 1
+
 
 def run_validation(client: Client) -> None:
     """Exercise the full RPC surface and assert expected behavior."""
@@ -220,7 +237,14 @@ def main() -> int:
         help="blink the LED this color until Ctrl-C (or --count times); e.g. --blink 0,0,32",
     )
     ap.add_argument("--period", type=float, default=0.3, help="blink half-period in seconds (default 0.3)")
-    ap.add_argument("--count", type=int, default=None, help="number of blinks (default: until Ctrl-C)")
+    ap.add_argument(
+        "--rainbow",
+        action="store_true",
+        help="sweep the LED through all colors; --duration sets seconds per cycle, --count sets number of cycles",
+    )
+    ap.add_argument("--duration", type=float, default=5.0, help="seconds per full color wheel for --rainbow (default 5.0)")
+    ap.add_argument("--brightness", type=int, default=40, help="max channel brightness 0-255 for --rainbow (default 40)")
+    ap.add_argument("--count", type=int, default=None, help="number of blinks/rainbow cycles (default: until Ctrl-C)")
     args = ap.parse_args()
 
     if args.spawn:
@@ -230,6 +254,15 @@ def main() -> int:
 
     client = Client(transport, timeout=args.timeout)
     try:
+        if args.rainbow:
+            how_many = args.count if args.count is not None else "until Ctrl-C"
+            print(f"rainbow: {args.duration}s/cycle, {how_many}")
+            try:
+                client.rainbow(duration=args.duration, brightness=args.brightness, cycles=args.count)
+            except KeyboardInterrupt:
+                print("\nstopping")
+            client.led_set(0, 0, 0)  # leave the LED off
+            return 0
         if args.blink is not None:
             r, g, b = (int(x) for x in args.blink.split(","))
             how_many = args.count if args.count is not None else "until Ctrl-C"

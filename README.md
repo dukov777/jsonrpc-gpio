@@ -94,6 +94,10 @@ python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,0,0    # off
 # Blink (client-side: toggles led_set on/off; Ctrl-C or --count to stop):
 python3 host_client.py --port /dev/cu.usbmodemXXXX --blink 0,0,32           # blink blue until Ctrl-C
 python3 host_client.py --port /dev/cu.usbmodemXXXX --blink 0,16,0 --count 5 --period 0.25
+
+# Rainbow (client-side hue sweep; --duration s/cycle, --count cycles, --brightness 0-255):
+python3 host_client.py --port /dev/cu.usbmodemXXXX --rainbow                       # forever, 5s/cycle
+python3 host_client.py --port /dev/cu.usbmodemXXXX --rainbow --duration 5 --count 3
 ```
 
 ## S3 device support
