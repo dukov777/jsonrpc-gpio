@@ -1,55 +1,80 @@
-//! ESP32-S3 USB Serial/JTAG transport — **DEFERRED stub** (plan §7).
+//! ESP32-S3 USB Serial/JTAG transport (plan §7).
 //!
-//! This is the starting point for the separate S3 hardware milestone. It is
-//! only compiled when targeting the device (`#[cfg(target_os = "espidf")]` in
-//! the parent module) and every method is `todo!()` until that milestone picks
-//! it up. It deliberately does NOT touch the host build.
+//! Wraps `esp_idf_hal`'s [`UsbSerialDriver`] — the S3's built-in USB
+//! Serial/JTAG controller on D-/D+ = GPIO19/GPIO20, no external bridge chip —
+//! and exposes it as an [`embedded_io`] byte stream so the existing
+//! [`crate::server::Framer`] drives it unchanged.
 //!
-//! # What to implement
+//! `UsbSerialDriver`'s own `embedded_io` impl hardcodes an *infinite*
+//! (`delay::BLOCK`) timeout on read and write. That is exactly the failure mode
+//! to avoid on this peripheral: a write blocks forever when the host has not
+//! opened the port. So this wrapper deliberately bypasses that impl and calls
+//! the driver's inherent `read`/`write` with **finite** `TickType` timeouts:
 //!
-//! Wrap `esp_idf_hal::usb_serial::UsbSerialDriver` (the S3's built-in USB
-//! Serial/JTAG controller on D-/D+ = GPIO19/GPIO20 — no external bridge chip)
-//! and implement [`embedded_io::Read`] + [`embedded_io::Write`] over it so the
-//! existing [`crate::server::Framer`] drives it unchanged.
+//! - `read` uses a short tick (`READ_TICK_MS`); the driver returns `Ok(0)` when
+//!   no byte arrives in that window, which the device loop treats as "no data
+//!   yet, continue" (and the short block keeps the task watchdog fed).
+//! - `write` first checks [`UsbSerialDriver::is_connected`] and returns a
+//!   `TimedOut` error if the host port is closed/unopened, then writes with a
+//!   bounded timeout (`WRITE_TIMEOUT_MS`); a zero-progress write also maps to
+//!   `TimedOut`. Either way the framer logs-and-drops the response instead of
+//!   hanging the loop.
 //!
-//! # Hard requirements (from the S3 USB Serial/JTAG quirks)
+//! # Hardware tests still owed (host-in-the-loop, can't run on host CI)
 //!
-//! - **Finite read tick.** `read` must return `Ok(0)` when no byte arrives
-//!   within a short timeout (e.g. 10 ms), not block forever — the device loop
-//!   treats `Ok(0)` as "no data yet, keep feeding the watchdog and continue".
-//! - **Finite write timeout. Never infinite.** If the host has not opened the
-//!   port (or has disconnected), a write must time out and the response is
-//!   dropped — the classic S3 failure mode is the device blocking on write /
-//!   hanging at startup until the host opens the serial port.
-//! - Map a write timeout to an `embedded_io::Error` with
-//!   `ErrorKind::TimedOut`; the framer already logs-and-drops on write error.
-//!
-//! # Tests to add for this milestone (hardware-in-the-loop)
-//!
-//! 1. Start the device with no host attached, then attach — the loop must not
-//!    have wedged, and a write issued while unopened must time out + drop.
+//! 1. Boot with no host attached, then attach — loop must not have wedged, and
+//!    a write while unopened must time out + drop.
 //! 2. Host disconnects mid-session — writes time out, never block forever.
-//! 3. Confirm the task watchdog stays fed given the blocking loop (the finite
-//!    read tick should already yield enough).
+//! 3. Task watchdog stays fed given the blocking read tick.
 
-use embedded_io::{ErrorKind, ErrorType};
+use embedded_io::ErrorKind;
+use esp_idf_hal::delay::TickType;
+use esp_idf_hal::sys::TickType_t;
+use esp_idf_hal::usb_serial::UsbSerialDriver;
+
+/// Read tick: how long `read` blocks waiting for bytes before returning Ok(0).
+const READ_TICK_MS: u64 = 10;
+/// Write timeout: bounded so an unopened/closed host port drops the response.
+const WRITE_TIMEOUT_MS: u64 = 200;
 
 /// Byte-stream transport over the ESP32-S3 USB Serial/JTAG controller.
-///
-/// Stub: holds nothing yet. The milestone adds the `UsbSerialDriver` handle and
-/// the read/write timeouts described in the module docs.
-pub struct S3Transport {
-    // milestone: driver: esp_idf_hal::usb_serial::UsbSerialDriver<'static>,
-    // milestone: read_tick: core::time::Duration,
-    // milestone: write_timeout: core::time::Duration,
-    _private: (),
+pub struct S3Transport<'d> {
+    driver: UsbSerialDriver<'d>,
+    read_tick: TickType_t,
+    write_timeout: TickType_t,
 }
 
-/// Transport error carrying an `embedded_io` error kind (e.g. `TimedOut` when a
-/// write to an unopened/closed host port times out).
+impl<'d> S3Transport<'d> {
+    /// Wrap an already-installed [`UsbSerialDriver`] (built in `main` from the
+    /// `usb_serial` peripheral + GPIO19/GPIO20).
+    pub fn new(driver: UsbSerialDriver<'d>) -> Self {
+        Self {
+            driver,
+            read_tick: TickType::new_millis(READ_TICK_MS).ticks(),
+            write_timeout: TickType::new_millis(WRITE_TIMEOUT_MS).ticks(),
+        }
+    }
+}
+
+/// Transport error carrying an `embedded_io` error kind (`TimedOut` when a write
+/// to an unopened/closed host port can't drain).
 #[derive(Debug)]
 pub struct S3Error {
     pub kind: ErrorKind,
+}
+
+impl S3Error {
+    fn timed_out() -> Self {
+        Self {
+            kind: ErrorKind::TimedOut,
+        }
+    }
+
+    fn other() -> Self {
+        Self {
+            kind: ErrorKind::Other,
+        }
+    }
 }
 
 impl core::fmt::Display for S3Error {
@@ -68,27 +93,43 @@ impl embedded_io::Error for S3Error {
     }
 }
 
-impl ErrorType for S3Transport {
+impl embedded_io::ErrorType for S3Transport<'_> {
     type Error = S3Error;
 }
 
-impl embedded_io::Read for S3Transport {
+impl embedded_io::Read for S3Transport<'_> {
     /// Read up to `buf.len()` bytes within a finite tick; `Ok(0)` on no-data.
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        let _ = buf;
-        todo!("S3 milestone: read with a finite tick, Ok(0) on timeout")
+        self.driver
+            .read(buf, self.read_tick)
+            .map_err(|_| S3Error::other())
     }
 }
 
-impl embedded_io::Write for S3Transport {
-    /// Write within a finite timeout; on timeout return `ErrorKind::TimedOut`
-    /// so the framer drops the response instead of hanging the loop.
+impl embedded_io::Write for S3Transport<'_> {
+    /// Write within a finite timeout. Returns `TimedOut` (so the framer drops
+    /// the response) when the host port is closed or nothing could be written.
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let _ = buf;
-        todo!("S3 milestone: write with a finite timeout, never infinite")
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        if !self.driver.is_connected() {
+            return Err(S3Error::timed_out());
+        }
+        let n = self
+            .driver
+            .write(buf, self.write_timeout)
+            .map_err(|_| S3Error::other())?;
+        if n == 0 {
+            Err(S3Error::timed_out())
+        } else {
+            Ok(n)
+        }
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
-        todo!("S3 milestone: flush within a finite timeout")
+        // usb_serial_jtag write drains to the host buffer directly; there is no
+        // separate finite-timeout flush to perform here.
+        Ok(())
     }
 }

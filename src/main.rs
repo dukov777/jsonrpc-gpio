@@ -40,19 +40,52 @@ mod host {
     }
 }
 
-// Device entry point (ESP32-S3) — wired in §7 with the real USB Serial/JTAG
-// transport and GPIO peripherals.
+// Device entry point (ESP32-S3): serve over the built-in USB Serial/JTAG
+// controller with a real raw-FFI GPIO backend.
 #[cfg(target_os = "espidf")]
-fn main() {
-    esp::run();
+fn main() -> anyhow::Result<()> {
+    esp::run()
 }
 
 #[cfg(target_os = "espidf")]
 mod esp {
-    pub fn run() {
+    use embedded_io::Read;
+
+    use esp_idf_hal::peripherals::Peripherals;
+    use esp_idf_hal::usb_serial::{config::Config as UsbConfig, UsbSerialDriver};
+
+    use jsonrpc_gpio::dispatch::{process_line, EspGpio};
+    use jsonrpc_gpio::server::{Framer, LINE_CAP};
+    use jsonrpc_gpio::transport::s3::S3Transport;
+
+    pub fn run() -> anyhow::Result<()> {
         esp_idf_svc::sys::link_patches();
         esp_idf_svc::log::EspLogger::initialize_default();
-        // The S3 USB Serial/JTAG transport + real GPIO backend land in §7.
-        todo!("S3 transport + GPIO wiring (§7, deferred milestone)");
+        log::info!("jsonrpc-gpio: starting on USB Serial/JTAG");
+
+        let peripherals = Peripherals::take()?;
+        // S3 USB Serial/JTAG: D- = GPIO19, D+ = GPIO20 (built-in, no bridge chip).
+        let driver = UsbSerialDriver::new(
+            peripherals.usb_serial,
+            peripherals.pins.gpio19,
+            peripherals.pins.gpio20,
+            &UsbConfig::new(),
+        )?;
+
+        let mut transport = S3Transport::new(driver);
+        let mut gpio = EspGpio::new();
+        let mut framer = Framer::<LINE_CAP>::new();
+        let mut dispatch = |line: &[u8]| process_line(line, &mut gpio);
+
+        let mut chunk = [0u8; 64];
+        loop {
+            match transport.read(&mut chunk) {
+                // Finite read tick elapsed with no data: keep looping (feeds the
+                // task watchdog). On-device this is "no data yet", not EOF.
+                Ok(0) => continue,
+                Ok(n) => framer.push(&chunk[..n], &mut transport, &mut dispatch),
+                Err(e) => log::warn!("transport read error (continuing): {e:?}"),
+            }
+        }
     }
 }

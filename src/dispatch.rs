@@ -117,6 +117,78 @@ impl GpioBackend for MockGpio {
     }
 }
 
+/// Real GPIO backend for the ESP32-S3, over raw `esp-idf-sys` so any pin can be
+/// driven by runtime number with a runtime mode (the typed `PinDriver` encodes
+/// mode in its type, which fights this protocol). Pins are validated against
+/// [`MAX_PIN`]; the unsafe FFI calls are single C calls with no aliasing.
+///
+/// Caveat: reading a pin configured as plain `output` is hardware-defined (the
+/// input buffer may be disabled). Configure `input`/`input_pullup` to read an
+/// external signal. This matches the host mock's surface but not its in-memory
+/// semantics — the milestone's hardware tests pin down exact behavior.
+#[cfg(target_os = "espidf")]
+#[derive(Default)]
+pub struct EspGpio;
+
+#[cfg(target_os = "espidf")]
+impl EspGpio {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(target_os = "espidf")]
+impl GpioBackend for EspGpio {
+    fn config(&mut self, pin: u8, mode: PinMode) -> Result<(), GpioError> {
+        use esp_idf_hal::sys::{
+            gpio_mode_t_GPIO_MODE_INPUT, gpio_mode_t_GPIO_MODE_OUTPUT,
+            gpio_pull_mode_t_GPIO_FLOATING, gpio_pull_mode_t_GPIO_PULLUP_ONLY, gpio_set_direction,
+            gpio_set_pull_mode,
+        };
+        check_pin(pin)?;
+        let num = pin as esp_idf_hal::sys::gpio_num_t;
+        let (dir, pull) = match mode {
+            PinMode::Input => (gpio_mode_t_GPIO_MODE_INPUT, gpio_pull_mode_t_GPIO_FLOATING),
+            PinMode::Output => (gpio_mode_t_GPIO_MODE_OUTPUT, gpio_pull_mode_t_GPIO_FLOATING),
+            PinMode::InputPullup => (
+                gpio_mode_t_GPIO_MODE_INPUT,
+                gpio_pull_mode_t_GPIO_PULLUP_ONLY,
+            ),
+        };
+        // SAFETY: `num` is a validated GPIO number; both are plain C calls.
+        esp_ok(unsafe { gpio_set_direction(num, dir) })?;
+        esp_ok(unsafe { gpio_set_pull_mode(num, pull) })?;
+        Ok(())
+    }
+
+    fn write(&mut self, pin: u8, level: u8) -> Result<(), GpioError> {
+        use esp_idf_hal::sys::gpio_set_level;
+        check_pin(pin)?;
+        let num = pin as esp_idf_hal::sys::gpio_num_t;
+        // SAFETY: validated pin number; single C call.
+        esp_ok(unsafe { gpio_set_level(num, u32::from(level != 0)) })
+    }
+
+    fn read(&mut self, pin: u8) -> Result<u8, GpioError> {
+        use esp_idf_hal::sys::gpio_get_level;
+        check_pin(pin)?;
+        let num = pin as esp_idf_hal::sys::gpio_num_t;
+        // SAFETY: validated pin number; single C call returning the level.
+        let level = unsafe { gpio_get_level(num) };
+        Ok(u8::from(level != 0))
+    }
+}
+
+/// Map an `esp_err_t` to a [`GpioError`] (`ESP_OK` == 0).
+#[cfg(target_os = "espidf")]
+fn esp_ok(code: esp_idf_hal::sys::esp_err_t) -> Result<(), GpioError> {
+    if code == 0 {
+        Ok(())
+    } else {
+        Err(GpioError::Backend(format!("esp_err_t {code}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

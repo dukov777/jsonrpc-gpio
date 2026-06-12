@@ -84,17 +84,30 @@ python3 host_client.py --spawn ./target/aarch64-apple-darwin/debug/jsonrpc-gpio
 python3 host_client.py --port /dev/tty.usbmodemXXXX --baud 115200
 ```
 
-## S3 milestone (deferred)
+## S3 device support
 
-The ESP32-S3 USB Serial/JTAG transport (`transport::s3`) is a documented stub.
-It is the start of a separate hardware milestone — see the module docs in
-`src/transport/s3.rs` for the required finite read tick / finite write timeout
-and the host-disconnect tests that must come first.
+The ESP32-S3 firmware is implemented and **cross-compiles** (`cargo build-s3`
+→ Xtensa ELF):
 
-The full crate (including this stub and the ESP-IDF deps) **cross-compiles for
-the ESP32-S3** — `cargo build-s3` produces a Xtensa firmware ELF. The stub's
-methods are `todo!()`, so flashing it will panic at the transport step until
-the milestone implements them.
+- `transport::s3::S3Transport` wraps `esp-idf-hal`'s `UsbSerialDriver` (USB
+  Serial/JTAG on GPIO19/GPIO20) with **finite** read/write timeouts and an
+  `is_connected()` guard — never the driver's default infinite block.
+- `dispatch::EspGpio` is a raw `esp-idf-sys` backend (`gpio_set_direction` /
+  `gpio_set_level` / `gpio_get_level`) driving any validated pin by runtime
+  number, behind the same `GpioBackend` trait as the host mock.
+- `main`'s device entry builds the driver + backend and runs the framer loop
+  (finite read tick, `Ok(0)` → continue to feed the watchdog).
+
+Flash + monitor:
+
+```bash
+cargo run-s3   # espflash flash --monitor (needs a connected S3)
+```
+
+**Not yet done — hardware-in-the-loop tests** (require a board; can't run in
+host CI). See `src/transport/s3.rs` module docs: (1) boot with no host attached
+then attach, (2) host disconnects mid-session, (3) watchdog stays fed. The
+firmware has been compiled but **not flashed or run on hardware**.
 
 [`embedded_io::Read`]: https://docs.rs/embedded-io
 [`embedded_io::Write`]: https://docs.rs/embedded-io
