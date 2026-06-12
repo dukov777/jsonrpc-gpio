@@ -1,0 +1,32 @@
+# Host-target CI: builds and runs the full host test suite (unit + E2E).
+#
+# Runs on an Apple-Silicon runner so the host triple matches the `test-host`
+# alias (aarch64-apple-darwin). `cargo test-host` is invoked directly (not piped
+# through `tee`), so a test failure propagates as a non-zero exit and fails the
+# job — no pipefail masking.
+#
+# NOTE: This workflow has not been executed (no CI runner available in the dev
+# environment). Validate on first push and adjust the toolchain action pin /
+# runner image as needed.
+name: host-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-host:
+    # macos-14 runners are arm64 -> aarch64-apple-darwin, matching `test-host`.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Espressif Rust fork (channel = "esp"), with rust-src for build-std.
+      - uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
+
+      - name: Run host test suite
+        run: cargo test-host

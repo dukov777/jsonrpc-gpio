@@ -1,0 +1,11 @@
+# --- Main task stack (the thread that runs Rust `main`) ---
+# The default is often too small for std + serde + logging. Bump it.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
+
+# --- FreeRTOS tick rate. 1000 Hz gives 1ms granularity for the read tick. ---
+CONFIG_FREERTOS_HZ=1000
+
+# --- Route the console to the built-in USB Serial/JTAG controller. ---
+# The ESP32-S3 exposes a virtual UART-like USB-CDC interface with no external
+# bridge chip; this is the transport the S3Transport (§7) will drive.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

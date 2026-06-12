@@ -1,0 +1,29 @@
+[alias]
+# Host unit tests — architecture-independent, run on the Mac (no board).
+# embedded_io's Read/Write impls for &[u8]/Vec<u8> make the framer + dispatch
+# fully testable here; the esp-idf-* deps are cfg'd out for this target.
+test-host = "test --target aarch64-apple-darwin"
+
+# Firmware build/flash for the ESP32-S3 (Xtensa). The `esp` toolchain targets
+# it; esp-idf-sys needs MCU set to pick the right chip headers.
+build-s3 = "build --target xtensa-esp32s3-espidf --config env.MCU=\"esp32s3\""
+run-s3 = "run --target xtensa-esp32s3-espidf --config env.MCU=\"esp32s3\""
+
+# No [build] target: the firmware build chooses the chip via the alias above,
+# and a bare `cargo build` / `cargo test-host` targets the host.
+
+[target.xtensa-esp32s3-espidf]
+linker = "ldproxy"
+# runner = "espflash flash --monitor" # or use `cargo run-s3`
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
+
+[env]
+ESP_IDF_VERSION = "v5.5.2"
+# Use the already-installed ESP-IDF; avoids re-downloading the full SDK.
+IDF_PATH = "/Users/petarlalov/.espressif/v5.5.2/esp-idf"
+# libclang from the esp toolchain, needed by esp-idf-sys's bindgen. Setting it
+# here avoids having to `source ~/export-esp.sh` before every build.
+LIBCLANG_PATH = "/Users/petarlalov/.rustup/toolchains/esp/xtensa-esp32-elf-clang/esp-20.1.1_20250829/esp-clang/lib"

@@ -1,0 +1,9 @@
+[toolchain]
+# Espressif's Rust fork, installed via espup (`espup install`). It bundles the
+# Xtensa LLVM backend for the ESP32-S3 (Xtensa). std is compiled from source via
+# build-std, so the chip target is NOT listed here (it isn't a downloadable
+# rustup component). rust-src ships with the fork.
+#
+# Host unit tests run on the native host target (aarch64-apple-darwin), which
+# this same toolchain can also target — so no second toolchain is needed.
+channel = "esp"

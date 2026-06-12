@@ -1,0 +1,43 @@
+[package]
+name = "jsonrpc-gpio"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+rust-version = "1.77"
+
+[[bin]]
+name = "jsonrpc-gpio"
+harness = false # do not use the built-in cargo test harness for the bin -> resolve rust-analyzer errors
+
+[profile.release]
+opt-level = "s"
+
+[profile.dev]
+debug = true       # symbols are nice and they don't increase the size on flash
+opt-level = "z"
+
+[dependencies]
+log = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Bounded line buffer for the NDJSON framer — a fixed-capacity Vec so an
+# oversized frame can never grow the heap without limit on-device.
+heapless = "0.8"
+# Standard byte-stream traits. esp-idf-hal's UsbSerialDriver implements
+# embedded_io::{Read,Write}, and so do std `&[u8]` / `Vec<u8>` — so the framer
+# is generic over these and the host tests need no mock crate. Must match the
+# version esp-idf-hal 0.46 uses (0.7) or the impls won't unify across crates.
+embedded-io = { version = "0.7", features = ["std"] }
+
+# ESP-IDF crates only compile when targeting the ESP (not during host unit tests).
+[target.'cfg(target_os = "espidf")'.dependencies]
+esp-idf-svc = { version = "0.52", default-features = false, features = ["native", "binstart", "std", "alloc"] }
+esp-idf-hal = "0.46"
+esp-idf-sys = "0.37"
+
+[dev-dependencies]
+rstest = "0.23"
+
+[build-dependencies]
+embuild = { version = "0.33", features = ["espidf"] }
