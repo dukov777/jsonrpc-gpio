@@ -64,9 +64,13 @@ Methods (params shown):
 {"jsonrpc":"2.0","id":1,"method":"gpio_config","params":{"pin":2,"mode":"output"}}
 {"jsonrpc":"2.0","id":2,"method":"gpio_write","params":{"pin":2,"level":1}}
 {"jsonrpc":"2.0","id":3,"method":"gpio_read","params":{"pin":2}}
+{"jsonrpc":"2.0","id":4,"method":"led_set","params":{"r":0,"g":16,"b":0}}
 ```
 
 `mode` ∈ `input | output | input_pullup`. `id` is `number | string | null`.
+`led_set` drives the on-board WS2812 (GPIO48); `r/g/b` are 0–255, `0,0,0` = off.
+On the host build it drives an in-memory mock LED (so it's testable); on the
+device it drives the real WS2812 via RMT.
 
 Error codes: `-32700` parse error, `-32601` method not found, `-32602` invalid
 params (e.g. pin out of range), `-32000` server/GPIO error.
@@ -80,8 +84,12 @@ id matching, and a read timeout:
 # Host build over a real PTY (stdlib only, no pyserial needed):
 python3 host_client.py --spawn ./target/aarch64-apple-darwin/debug/jsonrpc-gpio
 
-# Real ESP32-S3 hardware (needs pyserial):
-python3 host_client.py --port /dev/tty.usbmodemXXXX --baud 115200
+# Real ESP32-S3 hardware (stdlib only):
+python3 host_client.py --port /dev/cu.usbmodemXXXX --baud 115200
+
+# Control the on-board LED directly:
+python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,16,0   # green
+python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,0,0    # off
 ```
 
 ## S3 device support

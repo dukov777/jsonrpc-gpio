@@ -33,6 +33,8 @@ pub enum Request {
     GpioWrite { pin: u8, level: u8 },
     #[serde(rename = "gpio_read")]
     GpioRead { pin: u8 },
+    #[serde(rename = "led_set")]
+    LedSet { r: u8, g: u8, b: u8 },
 }
 
 /// A full JSON-RPC 2.0 request envelope. `id` is `number | string | null` per
@@ -127,6 +129,13 @@ mod tests {
                 mode: PinMode::InputPullup
             }
         );
+    }
+
+    #[test]
+    fn parses_led_set() {
+        let line = br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#;
+        let env = parse_request(line).expect("valid request parses");
+        assert_eq!(env.request, Request::LedSet { r: 0, g: 16, b: 0 });
     }
 
     #[test]

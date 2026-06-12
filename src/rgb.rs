@@ -59,3 +59,12 @@ impl<'d> Ws2812<'d> {
         self.tx.start_blocking(&signal)
     }
 }
+
+/// Lets the JSON-RPC `led_set` method drive the real WS2812 via the same
+/// [`crate::dispatch::LedBackend`] trait the host mock uses.
+impl crate::dispatch::LedBackend for Ws2812<'_> {
+    fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> Result<(), crate::dispatch::GpioError> {
+        Ws2812::set_rgb(self, r, g, b)
+            .map_err(|e| crate::dispatch::GpioError::Backend(format!("ws2812: {e}")))
+    }
+}

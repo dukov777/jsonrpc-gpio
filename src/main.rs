@@ -16,15 +16,16 @@ fn main() {
 mod host {
     use embedded_io::Read;
 
-    use jsonrpc_gpio::dispatch::{process_line, MockGpio};
+    use jsonrpc_gpio::dispatch::{process_line, MockGpio, MockLed};
     use jsonrpc_gpio::server::{Framer, LINE_CAP};
     use jsonrpc_gpio::transport::host::HostTransport;
 
     pub fn run() {
         let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
         let mut transport = HostTransport::new();
         let mut framer = Framer::<LINE_CAP>::new();
-        let mut dispatch = |line: &[u8]| process_line(line, &mut gpio);
+        let mut dispatch = |line: &[u8]| process_line(line, &mut gpio, &mut led);
 
         let mut chunk = [0u8; 64];
         loop {
@@ -85,7 +86,8 @@ mod esp {
         let mut transport = S3Transport::new(driver);
         let mut gpio = EspGpio::new();
         let mut framer = Framer::<LINE_CAP>::new();
-        let mut dispatch = |line: &[u8]| process_line(line, &mut gpio);
+        // `led` (the WS2812) is now also the LedBackend for `led_set` requests.
+        let mut dispatch = |line: &[u8]| process_line(line, &mut gpio, &mut led);
 
         let mut chunk = [0u8; 64];
         loop {

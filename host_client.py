@@ -167,6 +167,9 @@ class Client:
     def gpio_read(self, pin: int) -> int:
         return self.call("gpio_read", {"pin": pin})["level"]
 
+    def led_set(self, r: int, g: int, b: int):
+        return self.call("led_set", {"r": r, "g": g, "b": b})
+
 
 def run_validation(client: Client) -> None:
     """Exercise the full RPC surface and assert expected behavior."""
@@ -195,6 +198,11 @@ def main() -> int:
     src.add_argument("--port", metavar="DEV", help="serial port of real hardware")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--timeout", type=float, default=2.0)
+    ap.add_argument(
+        "--led",
+        metavar="R,G,B",
+        help="set the on-board LED to this color (0-255 each) and exit; e.g. --led 0,16,0 (green), --led 0,0,0 (off)",
+    )
     args = ap.parse_args()
 
     if args.spawn:
@@ -204,11 +212,16 @@ def main() -> int:
 
     client = Client(transport, timeout=args.timeout)
     try:
+        if args.led is not None:
+            r, g, b = (int(x) for x in args.led.split(","))
+            client.led_set(r, g, b)
+            print(f"led_set({r}, {g}, {b}) -> ok")
+            return 0
         print("running GPIO RPC validation...")
         run_validation(client)
         print("PASS")
         return 0
-    except (AssertionError, RuntimeError, Timeout) as e:
+    except (AssertionError, RuntimeError, Timeout, ValueError) as e:
         print(f"FAIL: {e}", file=sys.stderr)
         return 1
     finally:

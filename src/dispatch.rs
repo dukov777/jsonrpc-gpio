@@ -49,9 +49,15 @@ pub trait GpioBackend {
     fn read(&mut self, pin: u8) -> Result<u8, GpioError>;
 }
 
+/// The on-board RGB LED operation. Implemented by [`MockLed`] on the host and
+/// by the WS2812 RMT driver on the device.
+pub trait LedBackend {
+    fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> Result<(), GpioError>;
+}
+
 /// Parse, dispatch, and serialize one request line into one response line
 /// (no trailing newline — the framer adds it).
-pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend) -> String {
+pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend, led: &mut impl LedBackend) -> String {
     let env = match parse_request(line) {
         Ok(env) => env,
         // Unparseable / unknown method: no id to echo, so null per the spec.
@@ -63,6 +69,7 @@ pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend) -> String {
         Request::GpioConfig { pin, mode } => gpio.config(pin, mode).map(|()| json!({ "ok": true })),
         Request::GpioWrite { pin, level } => gpio.write(pin, level).map(|()| json!({ "ok": true })),
         Request::GpioRead { pin } => gpio.read(pin).map(|level| json!({ "level": level })),
+        Request::LedSet { r, g, b } => led.set_rgb(r, g, b).map(|()| json!({ "ok": true })),
     };
 
     match outcome {
@@ -87,6 +94,30 @@ impl MockGpio {
     /// The mode last set for `pin`, if any (test/inspection helper).
     pub fn mode_of(&self, pin: u8) -> Option<PinMode> {
         self.modes.get(&pin).copied()
+    }
+}
+
+/// In-memory LED backend for host builds and tests: records the last color set.
+#[derive(Default)]
+pub struct MockLed {
+    last: Option<(u8, u8, u8)>,
+}
+
+impl MockLed {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The last color set, if any (test/inspection helper).
+    pub fn last(&self) -> Option<(u8, u8, u8)> {
+        self.last
+    }
+}
+
+impl LedBackend for MockLed {
+    fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> Result<(), GpioError> {
+        self.last = Some((r, g, b));
+        Ok(())
     }
 }
 
@@ -198,7 +229,34 @@ mod tests {
     use serde_json::json;
 
     fn call(line: &[u8], gpio: &mut MockGpio) -> Value {
-        serde_json::from_str(&process_line(line, gpio)).expect("response is valid JSON")
+        let mut led = MockLed::new();
+        serde_json::from_str(&process_line(line, gpio, &mut led)).expect("response is valid JSON")
+    }
+
+    #[test]
+    fn led_set_drives_the_led_backend_and_acks() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        let resp: Value = serde_json::from_str(&process_line(
+            br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#,
+            &mut gpio,
+            &mut led,
+        ))
+        .unwrap();
+        assert_eq!(resp["result"], json!({ "ok": true }));
+        assert_eq!(led.last(), Some((0, 16, 0)));
+    }
+
+    #[test]
+    fn led_set_zero_is_off() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        process_line(
+            br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":0,"b":0}}"#,
+            &mut gpio,
+            &mut led,
+        );
+        assert_eq!(led.last(), Some((0, 0, 0)));
     }
 
     #[test]

@@ -59,6 +59,18 @@ fn malformed_line_yields_parse_error_null_id() {
 }
 
 #[test]
+fn led_set_returns_ok() {
+    let out = run_server(concat!(
+        r#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#,
+        "\n",
+    ));
+    let resp: serde_json::Value =
+        serde_json::from_str(out.lines().next().expect("a response")).expect("valid JSON");
+    assert_eq!(resp["result"], serde_json::json!({ "ok": true }));
+    assert_eq!(resp["id"], 1);
+}
+
+#[test]
 fn two_requests_coalesced_in_one_write_get_two_responses() {
     // Both requests arrive together; the framer must split them.
     let input = concat!(
