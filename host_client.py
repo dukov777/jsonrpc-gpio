@@ -14,9 +14,9 @@ Two transports:
     Spawns the host binary attached to a pseudo-terminal in raw mode and talks
     to it over the PTY master — a real serial-like path, validated on the host.
 
-  Serial (real ESP32-S3 hardware, needs pyserial)::
+  Serial (real ESP32-S3 hardware, stdlib only)::
 
-      python3 host_client.py --port /dev/tty.usbmodemXXXX --baud 115200
+      python3 host_client.py --port /dev/cu.usbmodemXXXX --baud 115200
 
 Exit code is 0 on success, 1 on any mismatch/timeout — so CI can gate on it.
 """
@@ -31,6 +31,7 @@ import select
 import subprocess
 import sys
 import termios
+import time
 import tty
 
 
@@ -83,25 +84,45 @@ class PtyTransport:
 
 
 class SerialTransport:
-    """pyserial-backed transport for real hardware."""
+    """Raw serial transport for real hardware (stdlib only, no pyserial).
+
+    Opens the tty in raw mode. Setting the baud via termios is a no-op for a
+    USB-CDC device (e.g. the S3 USB Serial/JTAG, where baud is nominal) and
+    takes effect for a real UART bridge.
+    """
 
     def __init__(self, port: str, baud: int, timeout: float):
-        import serial  # imported lazily so the PTY path needs no pyserial
-
-        self._ser = serial.Serial(port, baud, timeout=timeout)
+        self._fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        tty.setraw(self._fd)
+        baud_const = getattr(termios, f"B{baud}", None)
+        if baud_const is not None:
+            attrs = termios.tcgetattr(self._fd)
+            attrs[4] = baud_const  # ispeed
+            attrs[5] = baud_const  # ospeed
+            termios.tcsetattr(self._fd, termios.TCSANOW, attrs)
+        self._buf = bytearray()
 
     def write_line(self, data: bytes) -> None:
-        self._ser.write(data)
+        os.write(self._fd, data)
 
     def read_line(self, timeout: float) -> bytes:
-        self._ser.timeout = timeout
-        line = self._ser.readline()
-        if not line.endswith(b"\n"):
-            raise Timeout("no response within %.1fs" % timeout)
-        return line.rstrip(b"\n")
+        while b"\n" not in self._buf:
+            ready, _, _ = select.select([self._fd], [], [], timeout)
+            if not ready:
+                raise Timeout("no response within %.1fs" % timeout)
+            try:
+                chunk = os.read(self._fd, 4096)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                raise Timeout("serial port closed")
+            self._buf.extend(chunk)
+        line, _, rest = self._buf.partition(b"\n")
+        self._buf = bytearray(rest)
+        return bytes(line)
 
     def close(self) -> None:
-        self._ser.close()
+        os.close(self._fd)
 
 
 class Client:
@@ -116,13 +137,24 @@ class Client:
         request = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
         self._t.write_line((json.dumps(request) + "\n").encode())
 
-        raw = self._t.read_line(self._timeout)
-        resp = json.loads(raw)
-        if resp.get("id") != req_id:
-            raise AssertionError(f"id mismatch: sent {req_id}, got {resp.get('id')}")
-        if "error" in resp:
-            raise RuntimeError(f"rpc error: {resp['error']}")
-        return resp["result"]
+        # On real hardware the device's log/boot output shares the same serial
+        # endpoint as the JSON responses, so skip any line that isn't a JSON
+        # object echoing our id. Bounded by an overall deadline.
+        deadline = time.monotonic() + self._timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise Timeout(f"no matching response (id={req_id}) within {self._timeout:.1f}s")
+            raw = self._t.read_line(remaining)
+            try:
+                resp = json.loads(raw)
+            except (ValueError, UnicodeDecodeError):
+                continue  # log/boot noise, not a JSON-RPC response
+            if not isinstance(resp, dict) or resp.get("id") != req_id:
+                continue  # a response to some other request, or a notification
+            if "error" in resp:
+                raise RuntimeError(f"rpc error: {resp['error']}")
+            return resp["result"]
 
     # --- typed convenience wrappers ---
 

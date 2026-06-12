@@ -122,10 +122,9 @@ impl GpioBackend for MockGpio {
 /// mode in its type, which fights this protocol). Pins are validated against
 /// [`MAX_PIN`]; the unsafe FFI calls are single C calls with no aliasing.
 ///
-/// Caveat: reading a pin configured as plain `output` is hardware-defined (the
-/// input buffer may be disabled). Configure `input`/`input_pullup` to read an
-/// external signal. This matches the host mock's surface but not its in-memory
-/// semantics — the milestone's hardware tests pin down exact behavior.
+/// `output` maps to `INPUT_OUTPUT` (input buffer enabled) so a `gpio_read`
+/// after a `gpio_write` reads back the driven level — matching the host mock's
+/// write→read semantics. `input`/`input_pullup` read an external signal.
 #[cfg(target_os = "espidf")]
 #[derive(Default)]
 pub struct EspGpio;
@@ -141,7 +140,7 @@ impl EspGpio {
 impl GpioBackend for EspGpio {
     fn config(&mut self, pin: u8, mode: PinMode) -> Result<(), GpioError> {
         use esp_idf_hal::sys::{
-            gpio_mode_t_GPIO_MODE_INPUT, gpio_mode_t_GPIO_MODE_OUTPUT,
+            gpio_mode_t_GPIO_MODE_INPUT, gpio_mode_t_GPIO_MODE_INPUT_OUTPUT,
             gpio_pull_mode_t_GPIO_FLOATING, gpio_pull_mode_t_GPIO_PULLUP_ONLY, gpio_set_direction,
             gpio_set_pull_mode,
         };
@@ -149,7 +148,11 @@ impl GpioBackend for EspGpio {
         let num = pin as esp_idf_hal::sys::gpio_num_t;
         let (dir, pull) = match mode {
             PinMode::Input => (gpio_mode_t_GPIO_MODE_INPUT, gpio_pull_mode_t_GPIO_FLOATING),
-            PinMode::Output => (gpio_mode_t_GPIO_MODE_OUTPUT, gpio_pull_mode_t_GPIO_FLOATING),
+            // INPUT_OUTPUT (not plain OUTPUT) so reads see the driven level.
+            PinMode::Output => (
+                gpio_mode_t_GPIO_MODE_INPUT_OUTPUT,
+                gpio_pull_mode_t_GPIO_FLOATING,
+            ),
             PinMode::InputPullup => (
                 gpio_mode_t_GPIO_MODE_INPUT,
                 gpio_pull_mode_t_GPIO_PULLUP_ONLY,

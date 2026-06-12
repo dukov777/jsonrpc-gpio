@@ -98,16 +98,23 @@ The ESP32-S3 firmware is implemented and **cross-compiles** (`cargo build-s3`
 - `main`'s device entry builds the driver + backend and runs the framer loop
   (finite read tick, `Ok(0)` → continue to feed the watchdog).
 
-Flash + monitor:
+Flash + validate (validated on an ESP32-S3 rev v0.2):
 
 ```bash
-cargo run-s3   # espflash flash --monitor (needs a connected S3)
+espflash flash --port /dev/cu.usbmodemXXXX \
+  target/xtensa-esp32s3-espidf/debug/jsonrpc-gpio
+python3 host_client.py --port /dev/cu.usbmodemXXXX --timeout 8   # -> PASS
 ```
 
-**Not yet done — hardware-in-the-loop tests** (require a board; can't run in
-host CI). See `src/transport/s3.rs` module docs: (1) boot with no host attached
-then attach, (2) host disconnects mid-session, (3) watchdog stays fed. The
-firmware has been compiled but **not flashed or run on hardware**.
+The full RPC surface round-trips on real hardware over USB Serial/JTAG
+(`gpio_config`/`write`/`read`, with `output` pins reading back the driven
+level).
+
+**Still owed — explicit fault-injection tests** (require manual host
+attach/detach, can't run in host CI). See `src/transport/s3.rs` module docs:
+(1) boot with no host attached then attach, (2) host disconnects mid-session,
+(3) watchdog stays fed. The `is_connected()` write guard + finite timeouts that
+back these are implemented; the formal pass/fail tests are not yet scripted.
 
 [`embedded_io::Read`]: https://docs.rs/embedded-io
 [`embedded_io::Write`]: https://docs.rs/embedded-io
