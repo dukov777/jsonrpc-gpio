@@ -33,7 +33,10 @@ embedded-io = { version = "0.7", features = ["std"] }
 # ESP-IDF crates only compile when targeting the ESP (not during host unit tests).
 [target.'cfg(target_os = "espidf")'.dependencies]
 esp-idf-svc = { version = "0.52", default-features = false, features = ["native", "binstart", "std", "alloc"] }
-esp-idf-hal = "0.46"
+# `rmt-legacy` exposes the TxRmtDriver/FixedLengthSignal API used by the WS2812
+# demo driver (src/rgb.rs); the newer channel-based rmt API is more involved
+# than this throwaway demo warrants.
+esp-idf-hal = { version = "0.46", features = ["rmt-legacy"] }
 esp-idf-sys = "0.37"
 
 [dev-dependencies]

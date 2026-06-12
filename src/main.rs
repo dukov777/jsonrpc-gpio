@@ -55,6 +55,7 @@ mod esp {
     use esp_idf_hal::usb_serial::{config::Config as UsbConfig, UsbSerialDriver};
 
     use jsonrpc_gpio::dispatch::{process_line, EspGpio};
+    use jsonrpc_gpio::rgb::Ws2812;
     use jsonrpc_gpio::server::{Framer, LINE_CAP};
     use jsonrpc_gpio::transport::s3::S3Transport;
 
@@ -64,6 +65,15 @@ mod esp {
         log::info!("jsonrpc-gpio: starting on USB Serial/JTAG");
 
         let peripherals = Peripherals::take()?;
+
+        // Demo: light the on-board WS2812 (GPIO48) dim green once, proving the
+        // RMT path works. Not part of the JSON-RPC surface. (`rmt.channel0` is
+        // the legacy RMT channel handle the demo driver uses.)
+        #[allow(deprecated)]
+        let mut led = Ws2812::new(peripherals.rmt.channel0, peripherals.pins.gpio48)?;
+        led.set_rgb(0, 16, 0)?;
+        log::info!("on-board WS2812 (GPIO48) set to green");
+
         // S3 USB Serial/JTAG: D- = GPIO19, D+ = GPIO20 (built-in, no bridge chip).
         let driver = UsbSerialDriver::new(
             peripherals.usb_serial,

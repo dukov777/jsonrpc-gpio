@@ -97,6 +97,10 @@ The ESP32-S3 firmware is implemented and **cross-compiles** (`cargo build-s3`
   number, behind the same `GpioBackend` trait as the host mock.
 - `main`'s device entry builds the driver + backend and runs the framer loop
   (finite read tick, `Ok(0)` → continue to feed the watchdog).
+- `rgb::Ws2812` (demo, not in the RPC surface) lights the on-board WS2812 LED
+  on GPIO48 dim green at boot via the RMT peripheral — proof the addressable-LED
+  path works. A plain `gpio_write(48, …)` can't drive it (WS2812 needs the
+  ~800 kHz one-wire protocol).
 
 Flash + validate (validated on an ESP32-S3 rev v0.2):
 

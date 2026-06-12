@@ -14,5 +14,10 @@ pub mod protocol;
 pub mod server;
 pub mod transport;
 
+/// On-board WS2812 RGB LED (GPIO48) driver — device-only demo, not part of the
+/// JSON-RPC surface.
+#[cfg(target_os = "espidf")]
+pub mod rgb;
+
 #[cfg(test)]
 mod test_support;
