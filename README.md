@@ -90,6 +90,10 @@ python3 host_client.py --port /dev/cu.usbmodemXXXX --baud 115200
 # Control the on-board LED directly:
 python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,16,0   # green
 python3 host_client.py --port /dev/cu.usbmodemXXXX --led 0,0,0    # off
+
+# Blink (client-side: toggles led_set on/off; Ctrl-C or --count to stop):
+python3 host_client.py --port /dev/cu.usbmodemXXXX --blink 0,0,32           # blink blue until Ctrl-C
+python3 host_client.py --port /dev/cu.usbmodemXXXX --blink 0,16,0 --count 5 --period 0.25
 ```
 
 ## S3 device support

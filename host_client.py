@@ -170,6 +170,17 @@ class Client:
     def led_set(self, r: int, g: int, b: int):
         return self.call("led_set", {"r": r, "g": g, "b": b})
 
+    def blink(self, r: int, g: int, b: int, period: float = 0.3, count=None) -> None:
+        """Blink the LED on/off by toggling led_set. `count=None` blinks until
+        interrupted; each on and off phase lasts `period` seconds."""
+        n = 0
+        while count is None or n < count:
+            self.led_set(r, g, b)
+            time.sleep(period)
+            self.led_set(0, 0, 0)
+            time.sleep(period)
+            n += 1
+
 
 def run_validation(client: Client) -> None:
     """Exercise the full RPC surface and assert expected behavior."""
@@ -203,6 +214,13 @@ def main() -> int:
         metavar="R,G,B",
         help="set the on-board LED to this color (0-255 each) and exit; e.g. --led 0,16,0 (green), --led 0,0,0 (off)",
     )
+    ap.add_argument(
+        "--blink",
+        metavar="R,G,B",
+        help="blink the LED this color until Ctrl-C (or --count times); e.g. --blink 0,0,32",
+    )
+    ap.add_argument("--period", type=float, default=0.3, help="blink half-period in seconds (default 0.3)")
+    ap.add_argument("--count", type=int, default=None, help="number of blinks (default: until Ctrl-C)")
     args = ap.parse_args()
 
     if args.spawn:
@@ -212,6 +230,16 @@ def main() -> int:
 
     client = Client(transport, timeout=args.timeout)
     try:
+        if args.blink is not None:
+            r, g, b = (int(x) for x in args.blink.split(","))
+            how_many = args.count if args.count is not None else "until Ctrl-C"
+            print(f"blinking ({r},{g},{b}) period={args.period}s, {how_many}")
+            try:
+                client.blink(r, g, b, period=args.period, count=args.count)
+            except KeyboardInterrupt:
+                print("\nstopping")
+            client.led_set(0, 0, 0)  # leave the LED off
+            return 0
         if args.led is not None:
             r, g, b = (int(x) for x in args.led.split(","))
             client.led_set(r, g, b)
