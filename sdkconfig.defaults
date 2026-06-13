@@ -5,11 +5,17 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
 # --- FreeRTOS tick rate. 1000 Hz gives 1ms granularity for the read tick. ---
 CONFIG_FREERTOS_HZ=1000
 
-# --- Route the console (log::info!, panics, bootloader) to UART0. ---
-# The JTAG/USB-CDC port (GPIO19/20) is reserved for the JSON-RPC stream that
-# S3Transport (§7) drives — a serial port is exclusive, so we can't run a log
-# monitor and the RPC client on it at once. UART0 (GPIO43 TX / GPIO44 RX) is the
-# external USB-UART bridge cable; logs go there cleanly, RPC stays on JTAG, and
-# logging can no longer corrupt the NDJSON framing.
+# --- POC (poc/native-usb-rpc): native USB = RPC, UART cable = programming+logs. ---
+# RPC runs over the native USB Serial/JTAG CDC (GPIO19/20) — the fast port the
+# end product exposes. Console (log::info!, panics, bootloader) goes to UART0
+# (GPIO43/44 -> external USB-UART bridge cable), which is also the flashing port
+# (espflash resets to download over it via DTR/RTS). So in the field only the
+# native USB is needed (clean RPC); the UART cable is a dev/factory tool.
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_UART_NUM_0=y
+
+# CRITICAL for a clean RPC channel: with the primary console on UART0, IDF
+# *also* mirrors logs onto the native USB Serial/JTAG CDC by default
+# (CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y) — which would bleed boot-log
+# noise onto the RPC port. Disable it so the native USB CDC carries RPC only.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
