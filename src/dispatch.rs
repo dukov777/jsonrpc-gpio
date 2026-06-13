@@ -6,12 +6,14 @@
 //! Linux/macOS; the device build supplies a real backend over `esp-idf-hal`
 //! (§7) behind the same trait.
 
+use jsonrpc_lite::{Error as RpcError, Id, JsonRpc, Params};
 use serde_json::{json, Value};
 
-use crate::protocol::{
-    parse_request, PinMode, RawEnvelope, Request, Response, INVALID_PARAMS, METHOD_NOT_FOUND,
-    PARSE_ERROR, SERVER_ERROR,
-};
+use crate::protocol::{PinMode, Request};
+
+/// Custom server-error code for backend/hardware failures (no jsonrpc-lite
+/// constructor exists for it).
+pub const SERVER_ERROR: i64 = -32000;
 
 /// Highest GPIO number on the ESP32-S3 (GPIO0..=GPIO48). The mock validates
 /// against this range; a real backend should use a tighter allowlist.
@@ -27,17 +29,19 @@ pub enum GpioError {
 }
 
 impl GpioError {
-    pub fn code(&self) -> i32 {
+    /// Map this failure to a `jsonrpc-lite` error object.
+    fn to_rpc_error(&self) -> RpcError {
         match self {
-            GpioError::InvalidPin(_) => INVALID_PARAMS,
-            GpioError::Backend(_) => SERVER_ERROR,
-        }
-    }
-
-    pub fn message(&self) -> String {
-        match self {
-            GpioError::InvalidPin(pin) => format!("invalid pin: {pin}"),
-            GpioError::Backend(msg) => msg.clone(),
+            GpioError::InvalidPin(pin) => RpcError {
+                code: -32602, // invalid params
+                message: format!("invalid pin: {pin}"),
+                data: None,
+            },
+            GpioError::Backend(msg) => RpcError {
+                code: SERVER_ERROR,
+                message: msg.clone(),
+                data: None,
+            },
         }
     }
 }
@@ -56,34 +60,58 @@ pub trait LedBackend {
     fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> Result<(), GpioError>;
 }
 
+/// Serialize a `JsonRpc` response to a single-line JSON string (no trailing
+/// newline; `server.rs` appends the `\n`).
+fn serialize(rpc: JsonRpc) -> String {
+    serde_json::to_string(&rpc).expect("JsonRpc serializes")
+}
+
+/// The methods this server understands. Used to distinguish an unknown method
+/// (-32601) from bad params on a known method (-32602).
+const KNOWN_METHODS: [&str; 4] = ["gpio_config", "gpio_write", "gpio_read", "led_set"];
+
 /// Parse, dispatch, and serialize one request line.
 ///
-/// Returns `Some(response)` for requests, `None` for valid notifications
-/// (no `id` field — JSON-RPC 2.0 §4 requires these to be silently ignored).
+/// Returns `Some(response)` for requests, `None` for notifications (no `id`
+/// field — JSON-RPC 2.0 §4 requires these to be silently ignored).
 pub fn process_line(
     line: &[u8],
     gpio: &mut impl GpioBackend,
     led: &mut impl LedBackend,
 ) -> Option<String> {
-    // Phase 1: extract id and method name. Malformed JSON → PARSE_ERROR/null.
-    let raw: RawEnvelope = match serde_json::from_slice(line) {
-        Ok(r) => r,
-        Err(_) => return Some(Response::error(Value::Null, PARSE_ERROR, "parse error").to_json()),
+    // Phase 1: parse the envelope. Malformed JSON -> parse error, null id.
+    let rpc: JsonRpc = match serde_json::from_slice(line) {
+        Ok(rpc) => rpc,
+        Err(_) => return Some(serialize(JsonRpc::error(Id::None(()), RpcError::parse_error()))),
     };
 
-    // Notification: no id field → no response.
-    let id = match raw.id {
-        Some(id) => id,
-        None => return None,
+    // Notification (no id field) -> no response.
+    let id = rpc.get_id()?;
+
+    // Not a request (e.g. an inbound Success/Error object) -> invalid request.
+    let method = match rpc.get_method() {
+        Some(m) => m.to_owned(),
+        None => return Some(serialize(JsonRpc::error(id, RpcError::invalid_request()))),
     };
 
-    // Phase 2: full parse to get typed params.
-    let env = match parse_request(line) {
-        Ok(env) => env,
-        Err(_) => return Some(Response::error(id, METHOD_NOT_FOUND, "method not found").to_json()),
+    // Phase 2: classify the method, then type its params.
+    if !KNOWN_METHODS.contains(&method.as_str()) {
+        return Some(serialize(JsonRpc::error(id, RpcError::method_not_found())));
+    }
+
+    // Rebuild the internally-tagged shape our `Request` enum expects:
+    // {"method": "...", "params": {...}}.
+    let params = rpc.get_params().unwrap_or(Params::None(()));
+    let envelope = json!({
+        "method": method,
+        "params": serde_json::to_value(&params).expect("Params serializes"),
+    });
+    let request: Request = match serde_json::from_value(envelope) {
+        Ok(req) => req,
+        Err(_) => return Some(serialize(JsonRpc::error(id, RpcError::invalid_params()))),
     };
 
-    let outcome = match env.request {
+    let outcome = match request {
         Request::GpioConfig { pin, mode } => gpio.config(pin, mode).map(|()| json!({ "ok": true })),
         Request::GpioWrite { pin, level } => gpio.write(pin, level).map(|()| json!({ "ok": true })),
         Request::GpioRead { pin } => gpio.read(pin).map(|level| json!({ "level": level })),
@@ -91,8 +119,8 @@ pub fn process_line(
     };
 
     Some(match outcome {
-        Ok(result) => Response::result(id, result).to_json(),
-        Err(e) => Response::error(id, e.code(), e.message()).to_json(),
+        Ok(result) => serialize(JsonRpc::success(id, &result)),
+        Err(e) => serialize(JsonRpc::error(id, e.to_rpc_error())),
     })
 }
 
@@ -303,7 +331,9 @@ mod tests {
             br#"{"jsonrpc":"2.0","id":2,"method":"gpio_read","params":{"pin":2}}"#,
             &mut gpio,
         );
-        assert_eq!(resp, json!({"jsonrpc":"2.0","result":{"level":1},"id":2}));
+        assert_eq!(resp["result"], json!({"level":1}));
+        assert_eq!(resp["id"], json!(2));
+        assert!(resp.get("error").is_none());
     }
 
     #[test]
@@ -364,7 +394,7 @@ mod tests {
             br#"{"jsonrpc":"2.0","id":5,"method":"gpio_write","params":{"pin":200,"level":1}}"#,
             &mut gpio,
         );
-        assert_eq!(resp["error"]["code"], json!(INVALID_PARAMS));
+        assert_eq!(resp["error"]["code"], json!(-32602));
         assert_eq!(resp["id"], json!(5));
         assert!(resp.get("result").is_none());
     }
@@ -373,7 +403,7 @@ mod tests {
     fn malformed_line_is_parse_error_with_null_id() {
         let mut gpio = MockGpio::new();
         let resp = call(b"{ this is not json", &mut gpio);
-        assert_eq!(resp["error"]["code"], json!(PARSE_ERROR));
+        assert_eq!(resp["error"]["code"], json!(-32700));
         assert_eq!(resp["id"], Value::Null);
     }
 
@@ -400,8 +430,19 @@ mod tests {
         )
         .expect("unknown method produces a response");
         let resp: Value = serde_json::from_str(&response).expect("valid JSON");
-        assert_eq!(resp["error"]["code"], json!(METHOD_NOT_FOUND));
+        assert_eq!(resp["error"]["code"], json!(-32601));
         assert_eq!(resp["id"], json!(42));
+    }
+
+    #[test]
+    fn known_method_with_bad_params_is_invalid_params_not_method_not_found() {
+        let mut gpio = MockGpio::new();
+        let resp = call(
+            br#"{"jsonrpc":"2.0","id":1,"method":"gpio_write","params":{"pin":2}}"#,
+            &mut gpio,
+        );
+        assert_eq!(resp["error"]["code"], json!(-32602), "bad params on a known method -> invalid params");
+        assert_eq!(resp["id"], json!(1));
     }
 
     #[test]
