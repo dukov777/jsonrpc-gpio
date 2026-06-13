@@ -48,10 +48,14 @@ esp-idf-sys = "0.37"
 [dev-dependencies]
 rstest = "0.23"
 
-# Host-only: used by examples/serial_bench.rs to measure RPC roundtrip latency
-# against a real device over serial. Never pulled into the device build.
+# Host-only: used by examples/serial_bench.rs and examples/host_client.rs to talk
+# to a real device over serial. Never pulled into the device build.
 [target.'cfg(not(target_os = "espidf"))'.dev-dependencies]
 serialport = "4"
+# host_client.rs CLI: arg parsing (clap derive) and a Ctrl-C handler so blink/
+# rainbow can stop and leave the LED off, matching host_client.py.
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
 
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }
