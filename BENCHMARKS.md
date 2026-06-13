@@ -4,6 +4,10 @@ Measurements taken on an **ESP32-S3** (WeAct ESP32-S3-B, rev v0.2, 16 MB flash),
 ESP-IDF v5.5.2, talking over the built-in **USB Serial/JTAG** at `/dev/cu.usbmodem101`.
 Host: Apple Silicon macOS (`aarch64-apple-darwin`).
 
+The device console (`log::info!`, panics, bootloader) is routed to **UART0**
+(GPIO43/44), separate from the JTAG port that carries the RPC stream — so log
+traffic never shares the pipe with, or perturbs, the latency measurements below.
+
 ## RPC roundtrip latency
 
 End-to-end roundtrip = time from sending a request to receiving the matching

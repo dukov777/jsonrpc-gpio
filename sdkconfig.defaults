@@ -5,7 +5,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
 # --- FreeRTOS tick rate. 1000 Hz gives 1ms granularity for the read tick. ---
 CONFIG_FREERTOS_HZ=1000
 
-# --- Route the console to the built-in USB Serial/JTAG controller. ---
-# The ESP32-S3 exposes a virtual UART-like USB-CDC interface with no external
-# bridge chip; this is the transport the S3Transport (§7) will drive.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# --- Route the console (log::info!, panics, bootloader) to UART0. ---
+# The JTAG/USB-CDC port (GPIO19/20) is reserved for the JSON-RPC stream that
+# S3Transport (§7) drives — a serial port is exclusive, so we can't run a log
+# monitor and the RPC client on it at once. UART0 (GPIO43 TX / GPIO44 RX) is the
+# external USB-UART bridge cable; logs go there cleanly, RPC stays on JTAG, and
+# logging can no longer corrupt the NDJSON framing.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM_0=y

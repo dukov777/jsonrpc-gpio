@@ -171,6 +171,27 @@ The full RPC surface round-trips on real hardware over USB Serial/JTAG
 (`gpio_config`/`write`/`read`, with `output` pins reading back the driven
 level).
 
+### Device logs (console)
+
+The console (`log::info!`, panics, the bootloader banner) is routed to **UART0**
+(`CONFIG_ESP_CONSOLE_UART_DEFAULT`, GPIO43 TX / GPIO44 RX), *not* the JTAG port.
+A serial port is exclusive, so this keeps the two streams on separate cables: the
+JSON-RPC NDJSON runs over the USB Serial/JTAG port, and logs come out the external
+USB‑UART bridge — they can't fight over the port, and logging can't corrupt the
+RPC framing. With both cables attached you can monitor and drive the device at the
+same time:
+
+```bash
+# Terminal 1 — live device logs over the USB-UART bridge (Ctrl-] to exit):
+espflash monitor --port /dev/cu.wchusbserialXXXX --chip esp32s3
+
+# Terminal 2 — RPC over USB Serial/JTAG, concurrently, no port conflict:
+python3 host_client.py --port /dev/cu.usbmodemXXXX --read 45
+```
+
+Boot prints `cpu_start: GPIO 44 and 43 are used as console UART I/O pins`,
+followed by the app's own `jsonrpc_gpio::esp: ...` lines.
+
 **Fault-injection tests** (hardware-in-the-loop, can't run in host CI) —
 `s3_fault_tests.py`, all passing on a real board:
 
