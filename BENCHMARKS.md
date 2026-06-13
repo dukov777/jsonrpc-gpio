@@ -91,3 +91,26 @@ Estimated from the breakdown above plus a real minimal ESP-IDF C `hello_world`
 - **RAM: roughly the same** — dominated by FreeRTOS + IDF, identical in C.
 - The real floor is **ESP-IDF itself (~210 KB)**, not the language. Going far
   below that means dropping ESP-IDF (bare-metal), which loses the driver stack.
+
+## Fault-injection (resilience)
+
+Hardware-in-the-loop tests of the USB Serial/JTAG transport's failure modes,
+run on the connected ESP32-S3 via `s3_fault_tests.py` (cannot run in host CI —
+they manipulate the serial port and reset the device). All passing:
+
+| Scenario | Injected fault | Result |
+|----------|----------------|--------|
+| boot without host | reset + 6 s headless (`is_connected()==false`), then attach | **PASS** — boots without a blocking write, serves on attach |
+| disconnect under load | 3× fire 10 requests then yank the port mid-write | **PASS** — writes time out + drop, serves after every reconnect, never wedges |
+| watchdog idle | hold idle 20 s, scan for reset / `task_wdt` / panic markers | **PASS** — no reset, still responsive |
+
+Reproduce:
+
+```bash
+python3 s3_fault_tests.py --port /dev/cu.usbmodem101 \
+    --elf target/xtensa-esp32s3-espidf/debug/jsonrpc-gpio
+```
+
+These validate the transport design: the `is_connected()` write guard + finite
+write timeout (drop a response rather than block forever) and the finite read
+tick (yields each loop, keeping the task watchdog fed).
