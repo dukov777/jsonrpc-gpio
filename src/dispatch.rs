@@ -360,7 +360,7 @@ mod tests {
         )
         .expect("unknown method produces a response");
         let resp: Value = serde_json::from_str(&response).expect("valid JSON");
-        assert_eq!(resp["error"]["code"], json!(-32601));
+        assert_eq!(resp["error"]["code"], json!(METHOD_NOT_FOUND));
         assert_eq!(resp["id"], json!(42));
     }
 

@@ -41,7 +41,7 @@ pub enum Request {
 /// extract `id` and `method` before we know if the method is valid.
 /// `id` is `Option` because notifications omit it.
 #[derive(Debug, Deserialize)]
-pub struct RawEnvelope {
+pub(crate) struct RawEnvelope {
     #[serde(default)]
     pub id: Option<Value>,
     pub method: String,
