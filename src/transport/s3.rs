@@ -20,12 +20,17 @@
 //!   `TimedOut`. Either way the framer logs-and-drops the response instead of
 //!   hanging the loop.
 //!
-//! # Hardware tests still owed (host-in-the-loop, can't run on host CI)
+//! # Hardware fault-injection tests
 //!
-//! 1. Boot with no host attached, then attach — loop must not have wedged, and
-//!    a write while unopened must time out + drop.
-//! 2. Host disconnects mid-session — writes time out, never block forever.
-//! 3. Task watchdog stays fed given the blocking read tick.
+//! Exercised on a real board by `s3_fault_tests.py` (host-in-the-loop, not host
+//! CI) — all passing:
+//!
+//! 1. Boot with no host attached, then attach — device boots headless without a
+//!    blocking write and serves once attached.
+//! 2. Host disconnects mid-session under load — writes to the closed port time
+//!    out + drop; the loop never wedges and serves after reconnect.
+//! 3. Task watchdog stays fed given the blocking read tick — no reset over a
+//!    long idle hold.
 
 use embedded_io::ErrorKind;
 use esp_idf_hal::delay::TickType;

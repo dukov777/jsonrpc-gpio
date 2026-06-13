@@ -170,11 +170,18 @@ The full RPC surface round-trips on real hardware over USB Serial/JTAG
 (`gpio_config`/`write`/`read`, with `output` pins reading back the driven
 level).
 
-**Still owed — explicit fault-injection tests** (require manual host
-attach/detach, can't run in host CI). See `src/transport/s3.rs` module docs:
-(1) boot with no host attached then attach, (2) host disconnects mid-session,
-(3) watchdog stays fed. The `is_connected()` write guard + finite timeouts that
-back these are implemented; the formal pass/fail tests are not yet scripted.
+**Fault-injection tests** (hardware-in-the-loop, can't run in host CI) —
+`s3_fault_tests.py`, all passing on a real board:
+
+```bash
+python3 s3_fault_tests.py --port /dev/cu.usbmodemXXXX \
+    --elf target/xtensa-esp32s3-espidf/debug/jsonrpc-gpio
+```
+
+1. boot with no host attached, then attach → serves (no startup write-wedge);
+2. host disconnects mid-session under load → writes time out + drop, serves
+   after reconnect (never wedges);
+3. task watchdog stays fed under a long idle hold → no reset.
 
 ## License
 
