@@ -107,6 +107,25 @@ python3 host_client.py --port /dev/cu.usbmodemXXXX --rainbow                    
 python3 host_client.py --port /dev/cu.usbmodemXXXX --rainbow --duration 5 --count 3
 ```
 
+## Roundtrip latency benchmark
+
+End-to-end RPC roundtrip (send request → matching response) measured two ways
+against a real ESP32-S3 over USB Serial/JTAG:
+
+```bash
+# Python client benchmark:
+python3 host_client.py --port /dev/cu.usbmodemXXXX --bench 1000
+
+# Same benchmark in Rust (host target; serialport is a host-only dev-dep):
+cargo run --release --example serial_bench --target aarch64-apple-darwin -- \
+    /dev/cu.usbmodemXXXX 1000
+```
+
+Both report ~**3.7 ms median, ~268 req/s** — essentially identical. The roundtrip
+is **transport-bound** (USB-CDC framing dominates), so the client language is
+irrelevant and the device's JSON parse/dispatch/GPIO work is negligible inside
+that floor.
+
 ## S3 device support
 
 The ESP32-S3 firmware is implemented and **cross-compiles** (`cargo build-s3`

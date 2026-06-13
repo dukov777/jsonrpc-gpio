@@ -131,6 +131,7 @@ class Client:
         self._t = transport
         self._timeout = timeout
         self._next_id = 0
+        self.skipped = 0  # non-matching/noise lines skipped (benchmark integrity)
 
     def call(self, method: str, params: dict):
         self._next_id += 1
@@ -150,12 +151,34 @@ class Client:
             try:
                 resp = json.loads(raw)
             except (ValueError, UnicodeDecodeError):
+                self.skipped += 1
                 continue  # log/boot noise, not a JSON-RPC response
             if not isinstance(resp, dict) or resp.get("id") != req_id:
+                self.skipped += 1
                 continue  # a response to some other request, or a notification
             if "error" in resp:
                 raise RuntimeError(f"rpc error: {resp['error']}")
             return resp["result"]
+
+    def bench(self, n: int, method: str = "gpio_read", warmup: int = 10) -> list:
+        """Time `n` roundtrips of `method` with perf_counter; return ms samples.
+        Discards `warmup` initial calls (port/USB/first-call jitter)."""
+        def one():
+            if method == "gpio_read":
+                self.gpio_read(2)
+            elif method == "led_set":
+                self.led_set(0, 0, 0)
+            else:
+                self.call(method, {})
+        for _ in range(warmup):
+            one()
+        self.skipped = 0
+        samples = []
+        for _ in range(n):
+            t0 = time.perf_counter()
+            one()
+            samples.append((time.perf_counter() - t0) * 1000.0)
+        return samples
 
     # --- typed convenience wrappers ---
 
@@ -197,6 +220,46 @@ class Client:
                 r, g, b = colorsys.hsv_to_rgb(elapsed / duration, 1.0, value)
                 self.led_set(int(r * 255), int(g * 255), int(b * 255))
             n += 1
+
+
+def _percentile(sorted_s: list, p: float) -> float:
+    """Linear-interpolated percentile of an already-sorted list."""
+    if not sorted_s:
+        return 0.0
+    k = (len(sorted_s) - 1) * p / 100.0
+    lo = int(k)
+    hi = min(lo + 1, len(sorted_s) - 1)
+    return sorted_s[lo] + (sorted_s[hi] - sorted_s[lo]) * (k - lo)
+
+
+def print_latency_stats(samples: list, label: str, skipped: int = 0) -> None:
+    """Print min/p50/mean/p95/p99/max + req/s and a compact histogram (ms)."""
+    import statistics
+
+    s = sorted(samples)
+    mean = statistics.fmean(s)
+    print(f"roundtrip: {label}  ({len(s)} samples, {skipped} noise lines skipped)")
+    print(
+        f"  min {s[0]:6.2f}  p50 {_percentile(s,50):6.2f}  mean {mean:6.2f}  "
+        f"p95 {_percentile(s,95):6.2f}  p99 {_percentile(s,99):6.2f}  "
+        f"max {s[-1]:6.2f}   (ms)   stdev {statistics.pstdev(s):.2f}"
+    )
+    print(f"  throughput ~{1000.0 / mean:.0f} req/s")
+
+    # compact histogram over [min, p99] so a single outlier doesn't flatten it
+    hi = _percentile(s, 99)
+    lo = s[0]
+    bins = 12
+    width = (hi - lo) / bins or 1.0
+    counts = [0] * bins
+    for v in s:
+        idx = min(int((v - lo) / width), bins - 1) if v <= hi else bins - 1
+        counts[max(0, idx)] += 1
+    peak = max(counts) or 1
+    for i, c in enumerate(counts):
+        edge = lo + i * width
+        bar = "#" * int(40 * c / peak)
+        print(f"  {edge:6.2f} ms |{bar:<40} {c}")
 
 
 def run_validation(client: Client) -> None:
@@ -252,6 +315,18 @@ def main() -> int:
     )
     ap.add_argument("--write", metavar="PIN,LEVEL", help="write a GPIO pin level (0/1) and exit, e.g. --write 45,1")
     ap.add_argument("--read", metavar="PIN", type=int, help="read a GPIO pin's level and exit")
+    ap.add_argument(
+        "--bench",
+        metavar="N",
+        type=int,
+        help="measure end-to-end RPC roundtrip latency over N requests and exit",
+    )
+    ap.add_argument(
+        "--bench-method",
+        default="gpio_read",
+        choices=["gpio_read", "led_set"],
+        help="RPC method to time for --bench (default gpio_read = lightest device work)",
+    )
     args = ap.parse_args()
 
     if args.spawn:
@@ -261,6 +336,11 @@ def main() -> int:
 
     client = Client(transport, timeout=args.timeout)
     try:
+        if args.bench is not None:
+            print(f"benchmarking {args.bench}x {args.bench_method} (10 warmup)...")
+            samples = client.bench(args.bench, method=args.bench_method)
+            print_latency_stats(samples, f"{args.bench}x {args.bench_method}", client.skipped)
+            return 0
         if args.rainbow:
             how_many = args.count if args.count is not None else "until Ctrl-C"
             print(f"rainbow: {args.duration}s/cycle, {how_many}")

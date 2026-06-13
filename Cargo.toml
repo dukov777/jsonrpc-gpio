@@ -42,5 +42,10 @@ esp-idf-sys = "0.37"
 [dev-dependencies]
 rstest = "0.23"
 
+# Host-only: used by examples/serial_bench.rs to measure RPC roundtrip latency
+# against a real device over serial. Never pulled into the device build.
+[target.'cfg(not(target_os = "espidf"))'.dev-dependencies]
+serialport = "4"
+
 [build-dependencies]
 embuild = { version = "0.33", features = ["espidf"] }
