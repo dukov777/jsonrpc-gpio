@@ -458,4 +458,31 @@ mod tests {
         );
         assert_eq!(resp["id"], json!("req-42"));
     }
+
+    #[test]
+    fn missing_id_is_a_notification_with_no_response() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        let result = process_line(
+            br#"{"jsonrpc":"2.0","method":"gpio_read","params":{"pin":1}}"#,
+            &mut gpio,
+            &mut led,
+        );
+        assert!(result.is_none(), "a request without an id is a notification");
+    }
+
+    #[test]
+    fn explicit_null_id_gets_a_response_with_null_id() {
+        // A missing id is a notification, but an explicit `"id": null` is a
+        // request: jsonrpc-lite parses it as `Id::None` on a Request, so we echo
+        // a null id back (JSON-RPC 2.0 §4 allows a null id). gpio_read on an
+        // unconfigured pin errors, but the point here is the echoed id.
+        let mut gpio = MockGpio::new();
+        let resp = call(
+            br#"{"jsonrpc":"2.0","id":null,"method":"gpio_read","params":{"pin":1}}"#,
+            &mut gpio,
+        );
+        assert_eq!(resp["id"], Value::Null, "explicit null id is echoed as null");
+        assert!(resp.get("error").is_some());
+    }
 }
