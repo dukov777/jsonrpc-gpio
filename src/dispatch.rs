@@ -7,7 +7,7 @@
 //! (§7) behind the same trait.
 
 use jsonrpc_lite::{Error as RpcError, Id, JsonRpc, Params};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::protocol::{PinMode, Request};
 
@@ -278,7 +278,7 @@ fn esp_ok(code: esp_idf_hal::sys::esp_err_t) -> Result<(), GpioError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     fn call(line: &[u8], gpio: &mut MockGpio) -> Value {
         let mut led = MockLed::new();
