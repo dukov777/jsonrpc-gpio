@@ -25,3 +25,9 @@ sdkconfig.old
 __pycache__/
 *.pyc
 .venv/
+
+# Claude Code dir: track only the shared ESP32 footprint hooks. Everything else
+# is local/per-machine — nested git worktrees, personal settings, the size
+# baseline, and local logs must never be committed.
+/.claude/*
+!/.claude/hooks/
