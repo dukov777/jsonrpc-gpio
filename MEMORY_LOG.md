@@ -13,3 +13,4 @@ Cumulative flash and RAM cost per commit (debug build unless P=r).
 | 2026-06-13 19:48 | d |      663 |        0 |      15 |       0 |      56 |       0 | fix: scope serde_json::Value import to dispatch tests |
 | 2026-06-13 19:49 | d |      663 |        0 |      15 |       0 |      56 |       0 | fix: scope serde_json::Value import to dispatch tests |
 | 2026-06-13 19:49 | d |      663 |        0 |      15 |       0 |      56 |       0 | fix: scope serde_json::Value import to dispatch tests |
+| 2026-06-13 23:41 | r |      476 |        0 |      15 |       0 |      56 |       0 | docs: document footprint git hooks installer for fresh clones |

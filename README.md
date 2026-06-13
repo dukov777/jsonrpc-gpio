@@ -71,6 +71,30 @@ Prerequisites for device builds: [`espup`](https://github.com/esp-rs/espup)
 See [BENCHMARKS.md](BENCHMARKS.md) for roundtrip latency, flash/RAM footprint,
 and a pure-C size comparison.
 
+### Footprint git hooks (one-time, after clone)
+
+The repo ships footprint-tracking git hooks under `.claude/hooks/`, but git
+never version-controls `.git/hooks`, so a fresh clone has the scripts without
+the wiring. Install them once:
+
+```bash
+bash .claude/hooks/install.sh
+```
+
+This wires three hooks (idempotent; re-run any time, and it works from a
+worktree too):
+
+- **pre-commit** — prints the ESP32-S3 flash/RAM footprint, including an
+  App / Deps / SDK ownership breakdown and the delta vs the last commit.
+- **prepare-commit-msg** — records that commit's footprint row into
+  [MEMORY_LOG.md](MEMORY_LOG.md) (staged into the same commit, no amend).
+- **post-commit** — currently a no-op.
+
+The hooks only act when a device ELF exists under
+`target/xtensa-esp32s3-espidf/{debug,release}/` (build with `cargo build-s3`)
+and the esp `size`/`nm` tools are on `PATH` (`. ~/export-esp.sh`); otherwise
+they print a hint and exit harmlessly. They never block a commit.
+
 ## Protocol
 
 Methods (params shown):
