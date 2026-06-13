@@ -35,6 +35,8 @@ fn run_server(input: &str) -> String {
 #[test]
 fn write_then_read_roundtrips_over_stdio() {
     let input = concat!(
+        r#"{"jsonrpc":"2.0","id":0,"method":"gpio_config","params":{"pin":2,"mode":"output"}}"#,
+        "\n",
         r#"{"jsonrpc":"2.0","id":1,"method":"gpio_write","params":{"pin":2,"level":1}}"#,
         "\n",
         r#"{"jsonrpc":"2.0","id":2,"method":"gpio_read","params":{"pin":2}}"#,
@@ -42,9 +44,9 @@ fn write_then_read_roundtrips_over_stdio() {
     );
     let out = run_server(input);
     let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 2, "one response per request, got: {out:?}");
+    assert_eq!(lines.len(), 3, "one response per request, got: {out:?}");
 
-    let read_resp: serde_json::Value = serde_json::from_str(lines[1]).expect("valid JSON response");
+    let read_resp: serde_json::Value = serde_json::from_str(lines[2]).expect("valid JSON response");
     assert_eq!(read_resp["id"], 2);
     assert_eq!(read_resp["result"]["level"], 1);
 }

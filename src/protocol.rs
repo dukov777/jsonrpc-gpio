@@ -37,6 +37,16 @@ pub enum Request {
     LedSet { r: u8, g: u8, b: u8 },
 }
 
+/// Lightweight first-pass parse of the JSON-RPC envelope — just enough to
+/// extract `id` and `method` before we know if the method is valid.
+/// `id` is `Option` because notifications omit it.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEnvelope {
+    #[serde(default)]
+    pub id: Option<Value>,
+    pub method: String,
+}
+
 /// A full JSON-RPC 2.0 request envelope. `id` is `number | string | null` per
 /// the spec, so it is kept as a raw [`Value`] and echoed back verbatim.
 #[derive(Debug, PartialEq, Deserialize)]
@@ -106,6 +116,14 @@ pub fn parse_request(line: &[u8]) -> Result<Envelope, serde_json::Error> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn notification_deserializes_with_none_id() {
+        let line = br#"{"jsonrpc":"2.0","method":"gpio_read","params":{"pin":1}}"#;
+        let env: RawEnvelope = serde_json::from_slice(line).expect("notification parses");
+        assert!(env.id.is_none());
+        assert_eq!(env.method, "gpio_read");
+    }
 
     #[test]
     fn parses_gpio_write() {

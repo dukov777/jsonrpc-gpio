@@ -9,7 +9,8 @@
 use serde_json::{json, Value};
 
 use crate::protocol::{
-    parse_request, PinMode, Request, Response, INVALID_PARAMS, PARSE_ERROR, SERVER_ERROR,
+    parse_request, PinMode, RawEnvelope, Request, Response, INVALID_PARAMS, METHOD_NOT_FOUND,
+    PARSE_ERROR, SERVER_ERROR,
 };
 
 /// Highest GPIO number on the ESP32-S3 (GPIO0..=GPIO48). The mock validates
@@ -55,16 +56,33 @@ pub trait LedBackend {
     fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> Result<(), GpioError>;
 }
 
-/// Parse, dispatch, and serialize one request line into one response line
-/// (no trailing newline — the framer adds it).
-pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend, led: &mut impl LedBackend) -> String {
-    let env = match parse_request(line) {
-        Ok(env) => env,
-        // Unparseable / unknown method: no id to echo, so null per the spec.
-        Err(_) => return Response::error(Value::Null, PARSE_ERROR, "parse error").to_json(),
+/// Parse, dispatch, and serialize one request line.
+///
+/// Returns `Some(response)` for requests, `None` for valid notifications
+/// (no `id` field — JSON-RPC 2.0 §4 requires these to be silently ignored).
+pub fn process_line(
+    line: &[u8],
+    gpio: &mut impl GpioBackend,
+    led: &mut impl LedBackend,
+) -> Option<String> {
+    // Phase 1: extract id and method name. Malformed JSON → PARSE_ERROR/null.
+    let raw: RawEnvelope = match serde_json::from_slice(line) {
+        Ok(r) => r,
+        Err(_) => return Some(Response::error(Value::Null, PARSE_ERROR, "parse error").to_json()),
     };
 
-    let id = env.id;
+    // Notification: no id field → no response.
+    let id = match raw.id {
+        Some(id) => id,
+        None => return None,
+    };
+
+    // Phase 2: full parse to get typed params.
+    let env = match parse_request(line) {
+        Ok(env) => env,
+        Err(_) => return Some(Response::error(id, METHOD_NOT_FOUND, "method not found").to_json()),
+    };
+
     let outcome = match env.request {
         Request::GpioConfig { pin, mode } => gpio.config(pin, mode).map(|()| json!({ "ok": true })),
         Request::GpioWrite { pin, level } => gpio.write(pin, level).map(|()| json!({ "ok": true })),
@@ -72,10 +90,10 @@ pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend, led: &mut impl Led
         Request::LedSet { r, g, b } => led.set_rgb(r, g, b).map(|()| json!({ "ok": true })),
     };
 
-    match outcome {
+    Some(match outcome {
         Ok(result) => Response::result(id, result).to_json(),
         Err(e) => Response::error(id, e.code(), e.message()).to_json(),
-    }
+    })
 }
 
 /// In-memory GPIO backend for host builds and tests: a pin->level map plus the
@@ -138,12 +156,18 @@ impl GpioBackend for MockGpio {
 
     fn write(&mut self, pin: u8, level: u8) -> Result<(), GpioError> {
         check_pin(pin)?;
-        self.levels.insert(pin, level);
+        if !self.modes.contains_key(&pin) {
+            return Err(GpioError::Backend("pin not configured".into()));
+        }
+        self.levels.insert(pin, u8::from(level != 0));
         Ok(())
     }
 
     fn read(&mut self, pin: u8) -> Result<u8, GpioError> {
         check_pin(pin)?;
+        if !self.modes.contains_key(&pin) {
+            return Err(GpioError::Backend("pin not configured".into()));
+        }
         Ok(self.levels.get(&pin).copied().unwrap_or(0))
     }
 }
@@ -230,18 +254,22 @@ mod tests {
 
     fn call(line: &[u8], gpio: &mut MockGpio) -> Value {
         let mut led = MockLed::new();
-        serde_json::from_str(&process_line(line, gpio, &mut led)).expect("response is valid JSON")
+        let s = process_line(line, gpio, &mut led).expect("request produces a response");
+        serde_json::from_str(&s).expect("response is valid JSON")
     }
 
     #[test]
     fn led_set_drives_the_led_backend_and_acks() {
         let mut gpio = MockGpio::new();
         let mut led = MockLed::new();
-        let resp: Value = serde_json::from_str(&process_line(
-            br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#,
-            &mut gpio,
-            &mut led,
-        ))
+        let resp: Value = serde_json::from_str(
+            &process_line(
+                br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#,
+                &mut gpio,
+                &mut led,
+            )
+            .unwrap(),
+        )
         .unwrap();
         assert_eq!(resp["result"], json!({ "ok": true }));
         assert_eq!(led.last(), Some((0, 16, 0)));
@@ -255,13 +283,18 @@ mod tests {
             br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":0,"b":0}}"#,
             &mut gpio,
             &mut led,
-        );
+        )
+        .unwrap();
         assert_eq!(led.last(), Some((0, 0, 0)));
     }
 
     #[test]
     fn write_then_read_returns_stored_level() {
         let mut gpio = MockGpio::new();
+        call(
+            br#"{"jsonrpc":"2.0","id":0,"method":"gpio_config","params":{"pin":2,"mode":"output"}}"#,
+            &mut gpio,
+        );
         call(
             br#"{"jsonrpc":"2.0","id":1,"method":"gpio_write","params":{"pin":2,"level":1}}"#,
             &mut gpio,
@@ -274,13 +307,43 @@ mod tests {
     }
 
     #[test]
-    fn read_of_unset_pin_defaults_to_zero() {
+    fn read_of_unconfigured_pin_returns_error() {
         let mut gpio = MockGpio::new();
         let resp = call(
             br#"{"jsonrpc":"2.0","id":9,"method":"gpio_read","params":{"pin":7}}"#,
             &mut gpio,
         );
-        assert_eq!(resp["result"], json!({"level": 0}));
+        assert!(resp.get("error").is_some(), "expected error for unconfigured pin read");
+        assert!(resp.get("result").is_none());
+    }
+
+    #[test]
+    fn write_normalises_level_to_binary() {
+        let mut gpio = MockGpio::new();
+        call(
+            br#"{"jsonrpc":"2.0","id":1,"method":"gpio_config","params":{"pin":3,"mode":"output"}}"#,
+            &mut gpio,
+        );
+        call(
+            br#"{"jsonrpc":"2.0","id":2,"method":"gpio_write","params":{"pin":3,"level":2}}"#,
+            &mut gpio,
+        );
+        let resp = call(
+            br#"{"jsonrpc":"2.0","id":3,"method":"gpio_read","params":{"pin":3}}"#,
+            &mut gpio,
+        );
+        assert_eq!(resp["result"]["level"], json!(1), "level=2 must normalise to 1");
+    }
+
+    #[test]
+    fn write_to_unconfigured_pin_returns_error() {
+        let mut gpio = MockGpio::new();
+        let resp = call(
+            br#"{"jsonrpc":"2.0","id":10,"method":"gpio_write","params":{"pin":5,"level":1}}"#,
+            &mut gpio,
+        );
+        assert!(resp.get("error").is_some(), "expected error for unconfigured pin write");
+        assert!(resp.get("result").is_none());
     }
 
     #[test]
@@ -315,8 +378,39 @@ mod tests {
     }
 
     #[test]
+    fn notification_returns_no_response() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        let result = process_line(
+            br#"{"jsonrpc":"2.0","method":"gpio_read","params":{"pin":1}}"#,
+            &mut gpio,
+            &mut led,
+        );
+        assert!(result.is_none(), "notifications must produce no response");
+    }
+
+    #[test]
+    fn unknown_method_returns_method_not_found_with_id() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        let response = process_line(
+            br#"{"jsonrpc":"2.0","id":42,"method":"gpio_explode","params":{}}"#,
+            &mut gpio,
+            &mut led,
+        )
+        .expect("unknown method produces a response");
+        let resp: Value = serde_json::from_str(&response).expect("valid JSON");
+        assert_eq!(resp["error"]["code"], json!(METHOD_NOT_FOUND));
+        assert_eq!(resp["id"], json!(42));
+    }
+
+    #[test]
     fn string_id_is_echoed_back() {
         let mut gpio = MockGpio::new();
+        call(
+            br#"{"jsonrpc":"2.0","id":0,"method":"gpio_config","params":{"pin":1,"mode":"input"}}"#,
+            &mut gpio,
+        );
         let resp = call(
             br#"{"jsonrpc":"2.0","id":"req-42","method":"gpio_read","params":{"pin":1}}"#,
             &mut gpio,

@@ -48,13 +48,15 @@ impl<const N: usize> Framer<N> {
     }
 
     /// Feed one chunk of freshly-read bytes. For each complete line, calls
-    /// `dispatch(line)` and writes `dispatch`'s response followed by `\n` to
-    /// `out`. A write error is logged and the response dropped — the loop keeps
-    /// running so a closed/unopened host port can't wedge the server.
+    /// `dispatch(line)` and, if it returns `Some(response)`, writes the
+    /// response followed by `\n` to `out`. `None` means the line was a
+    /// notification — no response is written. A write error is logged and the
+    /// response dropped — the loop keeps running so a closed/unopened host port
+    /// can't wedge the server.
     pub fn push<W, F>(&mut self, chunk: &[u8], out: &mut W, dispatch: &mut F)
     where
         W: Write,
-        F: FnMut(&[u8]) -> String,
+        F: FnMut(&[u8]) -> Option<String>,
     {
         for &byte in chunk {
             if byte == b'\n' {
@@ -74,7 +76,7 @@ impl<const N: usize> Framer<N> {
     fn end_line<W, F>(&mut self, out: &mut W, dispatch: &mut F)
     where
         W: Write,
-        F: FnMut(&[u8]) -> String,
+        F: FnMut(&[u8]) -> Option<String>,
     {
         if self.skipping {
             // We were discarding an oversized line; this newline ends it.
@@ -90,13 +92,15 @@ impl<const N: usize> Framer<N> {
         };
 
         if !line.is_empty() {
-            let response = dispatch(line);
-            // One write so a finite-timeout transport sees a single frame; a
-            // write error means the host port is closed — drop and keep going.
-            let mut framed = response.into_bytes();
-            framed.push(b'\n');
-            if let Err(e) = out.write_all(&framed) {
-                log::warn!("dropping response, transport write failed: {e:?}");
+            if let Some(response) = dispatch(line) {
+                // One write so a finite-timeout transport sees a single frame;
+                // a write error means the host port is closed — drop and keep
+                // going.
+                let mut framed = response.into_bytes();
+                framed.push(b'\n');
+                if let Err(e) = out.write_all(&framed) {
+                    log::warn!("dropping response, transport write failed: {e:?}");
+                }
             }
         }
 
@@ -112,10 +116,10 @@ mod tests {
     use std::cell::Cell;
 
     /// A dispatch that echoes the line back verbatim and counts invocations.
-    fn echo_counting(calls: &Cell<usize>) -> impl FnMut(&[u8]) -> String + '_ {
+    fn echo_counting(calls: &Cell<usize>) -> impl FnMut(&[u8]) -> Option<String> + '_ {
         move |line: &[u8]| {
             calls.set(calls.get() + 1);
-            String::from_utf8_lossy(line).into_owned()
+            Some(String::from_utf8_lossy(line).into_owned())
         }
     }
 
