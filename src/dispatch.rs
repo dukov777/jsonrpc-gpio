@@ -159,7 +159,7 @@ impl GpioBackend for MockGpio {
         if !self.modes.contains_key(&pin) {
             return Err(GpioError::Backend("pin not configured".into()));
         }
-        self.levels.insert(pin, if level != 0 { 1 } else { 0 });
+        self.levels.insert(pin, u8::from(level != 0));
         Ok(())
     }
 
