@@ -9,7 +9,8 @@
 use serde_json::{json, Value};
 
 use crate::protocol::{
-    parse_request, PinMode, Request, Response, INVALID_PARAMS, PARSE_ERROR, SERVER_ERROR,
+    parse_request, PinMode, RawEnvelope, Request, Response, INVALID_PARAMS, METHOD_NOT_FOUND,
+    PARSE_ERROR, SERVER_ERROR,
 };
 
 /// Highest GPIO number on the ESP32-S3 (GPIO0..=GPIO48). The mock validates
@@ -55,16 +56,33 @@ pub trait LedBackend {
     fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> Result<(), GpioError>;
 }
 
-/// Parse, dispatch, and serialize one request line into one response line
-/// (no trailing newline — the framer adds it).
-pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend, led: &mut impl LedBackend) -> String {
-    let env = match parse_request(line) {
-        Ok(env) => env,
-        // Unparseable / unknown method: no id to echo, so null per the spec.
-        Err(_) => return Response::error(Value::Null, PARSE_ERROR, "parse error").to_json(),
+/// Parse, dispatch, and serialize one request line.
+///
+/// Returns `Some(response)` for requests, `None` for valid notifications
+/// (no `id` field — JSON-RPC 2.0 §4 requires these to be silently ignored).
+pub fn process_line(
+    line: &[u8],
+    gpio: &mut impl GpioBackend,
+    led: &mut impl LedBackend,
+) -> Option<String> {
+    // Phase 1: extract id and method name. Malformed JSON → PARSE_ERROR/null.
+    let raw: RawEnvelope = match serde_json::from_slice(line) {
+        Ok(r) => r,
+        Err(_) => return Some(Response::error(Value::Null, PARSE_ERROR, "parse error").to_json()),
     };
 
-    let id = env.id;
+    // Notification: no id field → no response.
+    let id = match raw.id {
+        Some(id) => id,
+        None => return None,
+    };
+
+    // Phase 2: full parse to get typed params.
+    let env = match parse_request(line) {
+        Ok(env) => env,
+        Err(_) => return Some(Response::error(id, METHOD_NOT_FOUND, "method not found").to_json()),
+    };
+
     let outcome = match env.request {
         Request::GpioConfig { pin, mode } => gpio.config(pin, mode).map(|()| json!({ "ok": true })),
         Request::GpioWrite { pin, level } => gpio.write(pin, level).map(|()| json!({ "ok": true })),
@@ -72,10 +90,10 @@ pub fn process_line(line: &[u8], gpio: &mut impl GpioBackend, led: &mut impl Led
         Request::LedSet { r, g, b } => led.set_rgb(r, g, b).map(|()| json!({ "ok": true })),
     };
 
-    match outcome {
+    Some(match outcome {
         Ok(result) => Response::result(id, result).to_json(),
         Err(e) => Response::error(id, e.code(), e.message()).to_json(),
-    }
+    })
 }
 
 /// In-memory GPIO backend for host builds and tests: a pin->level map plus the
@@ -230,18 +248,22 @@ mod tests {
 
     fn call(line: &[u8], gpio: &mut MockGpio) -> Value {
         let mut led = MockLed::new();
-        serde_json::from_str(&process_line(line, gpio, &mut led)).expect("response is valid JSON")
+        let s = process_line(line, gpio, &mut led).expect("request produces a response");
+        serde_json::from_str(&s).expect("response is valid JSON")
     }
 
     #[test]
     fn led_set_drives_the_led_backend_and_acks() {
         let mut gpio = MockGpio::new();
         let mut led = MockLed::new();
-        let resp: Value = serde_json::from_str(&process_line(
-            br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#,
-            &mut gpio,
-            &mut led,
-        ))
+        let resp: Value = serde_json::from_str(
+            &process_line(
+                br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":16,"b":0}}"#,
+                &mut gpio,
+                &mut led,
+            )
+            .unwrap(),
+        )
         .unwrap();
         assert_eq!(resp["result"], json!({ "ok": true }));
         assert_eq!(led.last(), Some((0, 16, 0)));
@@ -255,7 +277,8 @@ mod tests {
             br#"{"jsonrpc":"2.0","id":1,"method":"led_set","params":{"r":0,"g":0,"b":0}}"#,
             &mut gpio,
             &mut led,
-        );
+        )
+        .unwrap();
         assert_eq!(led.last(), Some((0, 0, 0)));
     }
 
@@ -312,6 +335,33 @@ mod tests {
         let resp = call(b"{ this is not json", &mut gpio);
         assert_eq!(resp["error"]["code"], json!(PARSE_ERROR));
         assert_eq!(resp["id"], Value::Null);
+    }
+
+    #[test]
+    fn notification_returns_no_response() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        let result = process_line(
+            br#"{"jsonrpc":"2.0","method":"gpio_read","params":{"pin":1}}"#,
+            &mut gpio,
+            &mut led,
+        );
+        assert!(result.is_none(), "notifications must produce no response");
+    }
+
+    #[test]
+    fn unknown_method_returns_method_not_found_with_id() {
+        let mut gpio = MockGpio::new();
+        let mut led = MockLed::new();
+        let response = process_line(
+            br#"{"jsonrpc":"2.0","id":42,"method":"gpio_explode","params":{}}"#,
+            &mut gpio,
+            &mut led,
+        )
+        .expect("unknown method produces a response");
+        let resp: Value = serde_json::from_str(&response).expect("valid JSON");
+        assert_eq!(resp["error"]["code"], json!(-32601));
+        assert_eq!(resp["id"], json!(42));
     }
 
     #[test]
