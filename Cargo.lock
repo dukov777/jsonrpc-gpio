@@ -970,11 +970,22 @@ dependencies = [
  "esp-idf-svc",
  "esp-idf-sys",
  "heapless 0.8.0",
+ "jsonrpc-lite",
  "log",
  "rstest",
  "serde",
  "serde_json",
  "serialport",
+]
+
+[[package]]
+name = "jsonrpc-lite"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3b61c092f08bd647681816f1c69730973ca62dbc996ef44a73c8f8d11d0af64"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

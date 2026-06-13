@@ -24,6 +24,9 @@ log = "0.4"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# JSON-RPC 2.0 envelope/Id/Error data structures. Pure serde types over
+# serde_json (no new transitive deps); builds on std, which esp-idf provides.
+jsonrpc-lite = "0.7"
 # Bounded line buffer for the NDJSON framer — a fixed-capacity Vec so an
 # oversized frame can never grow the heap without limit on-device.
 heapless = "0.8"
