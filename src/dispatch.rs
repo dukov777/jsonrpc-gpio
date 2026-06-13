@@ -156,12 +156,18 @@ impl GpioBackend for MockGpio {
 
     fn write(&mut self, pin: u8, level: u8) -> Result<(), GpioError> {
         check_pin(pin)?;
-        self.levels.insert(pin, level);
+        if !self.modes.contains_key(&pin) {
+            return Err(GpioError::Backend("pin not configured".into()));
+        }
+        self.levels.insert(pin, if level != 0 { 1 } else { 0 });
         Ok(())
     }
 
     fn read(&mut self, pin: u8) -> Result<u8, GpioError> {
         check_pin(pin)?;
+        if !self.modes.contains_key(&pin) {
+            return Err(GpioError::Backend("pin not configured".into()));
+        }
         Ok(self.levels.get(&pin).copied().unwrap_or(0))
     }
 }
@@ -286,6 +292,10 @@ mod tests {
     fn write_then_read_returns_stored_level() {
         let mut gpio = MockGpio::new();
         call(
+            br#"{"jsonrpc":"2.0","id":0,"method":"gpio_config","params":{"pin":2,"mode":"output"}}"#,
+            &mut gpio,
+        );
+        call(
             br#"{"jsonrpc":"2.0","id":1,"method":"gpio_write","params":{"pin":2,"level":1}}"#,
             &mut gpio,
         );
@@ -297,13 +307,43 @@ mod tests {
     }
 
     #[test]
-    fn read_of_unset_pin_defaults_to_zero() {
+    fn read_of_unconfigured_pin_returns_error() {
         let mut gpio = MockGpio::new();
         let resp = call(
             br#"{"jsonrpc":"2.0","id":9,"method":"gpio_read","params":{"pin":7}}"#,
             &mut gpio,
         );
-        assert_eq!(resp["result"], json!({"level": 0}));
+        assert!(resp.get("error").is_some(), "expected error for unconfigured pin read");
+        assert!(resp.get("result").is_none());
+    }
+
+    #[test]
+    fn write_normalises_level_to_binary() {
+        let mut gpio = MockGpio::new();
+        call(
+            br#"{"jsonrpc":"2.0","id":1,"method":"gpio_config","params":{"pin":3,"mode":"output"}}"#,
+            &mut gpio,
+        );
+        call(
+            br#"{"jsonrpc":"2.0","id":2,"method":"gpio_write","params":{"pin":3,"level":2}}"#,
+            &mut gpio,
+        );
+        let resp = call(
+            br#"{"jsonrpc":"2.0","id":3,"method":"gpio_read","params":{"pin":3}}"#,
+            &mut gpio,
+        );
+        assert_eq!(resp["result"]["level"], json!(1), "level=2 must normalise to 1");
+    }
+
+    #[test]
+    fn write_to_unconfigured_pin_returns_error() {
+        let mut gpio = MockGpio::new();
+        let resp = call(
+            br#"{"jsonrpc":"2.0","id":10,"method":"gpio_write","params":{"pin":5,"level":1}}"#,
+            &mut gpio,
+        );
+        assert!(resp.get("error").is_some(), "expected error for unconfigured pin write");
+        assert!(resp.get("result").is_none());
     }
 
     #[test]
@@ -367,6 +407,10 @@ mod tests {
     #[test]
     fn string_id_is_echoed_back() {
         let mut gpio = MockGpio::new();
+        call(
+            br#"{"jsonrpc":"2.0","id":0,"method":"gpio_config","params":{"pin":1,"mode":"input"}}"#,
+            &mut gpio,
+        );
         let resp = call(
             br#"{"jsonrpc":"2.0","id":"req-42","method":"gpio_read","params":{"pin":1}}"#,
             &mut gpio,
