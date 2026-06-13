@@ -20,10 +20,14 @@ rustflags = ["--cfg", "espidf_time64"]
 [unstable]
 build-std = ["std", "panic_abort"]
 
+# Device builds (build-s3 / run-s3) additionally need the esp toolchain in PATH
+# and LIBCLANG_PATH for esp-idf-sys's bindgen — both provided by espup's script:
+#
+#     . ~/export-esp.sh
+#
+# IDF_PATH is intentionally NOT set here: esp-idf-sys resolves the SDK from
+# ESP_IDF_VERSION below at the global ~/.espressif location, so this config stays
+# portable (no machine-specific absolute paths). Host tests (`cargo test-host`)
+# need none of this.
 [env]
 ESP_IDF_VERSION = "v5.5.2"
-# Use the already-installed ESP-IDF; avoids re-downloading the full SDK.
-IDF_PATH = "/Users/petarlalov/.espressif/v5.5.2/esp-idf"
-# libclang from the esp toolchain, needed by esp-idf-sys's bindgen. Setting it
-# here avoids having to `source ~/export-esp.sh` before every build.
-LIBCLANG_PATH = "/Users/petarlalov/.rustup/toolchains/esp/xtensa-esp32-elf-clang/esp-20.1.1_20250829/esp-clang/lib"

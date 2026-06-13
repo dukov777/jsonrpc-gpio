@@ -1,13 +1,9 @@
-# Host-target CI: builds and runs the full host test suite (unit + E2E).
+# Host-target CI: build and run the host test suite (unit + E2E) on macOS.
 #
 # Runs on an Apple-Silicon runner so the host triple matches the `test-host`
-# alias (aarch64-apple-darwin). `cargo test-host` is invoked directly (not piped
-# through `tee`), so a test failure propagates as a non-zero exit and fails the
-# job — no pipefail masking.
-#
-# NOTE: This workflow has not been executed (no CI runner available in the dev
-# environment). Validate on first push and adjust the toolchain action pin /
-# runner image as needed.
+# alias (aarch64-apple-darwin). `cargo test-host --tests` runs the lib unit
+# tests + integration tests, skipping examples (so the serial benchmark's
+# `serialport` dep isn't built in CI). No `tee`, so a failure fails the job.
 name: host-ci
 
 on:
@@ -16,17 +12,21 @@ on:
 
 jobs:
   test-host:
-    # macos-14 runners are arm64 -> aarch64-apple-darwin, matching `test-host`.
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
       # Espressif Rust fork (channel = "esp"), with rust-src for build-std.
+      # GITHUB_TOKEN authenticates the action's GitHub API lookup of the latest
+      # toolchain version, avoiding the unauthenticated 60 req/hr rate-limit
+      # (403 Forbidden) on shared runners.
       - uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
           buildtargets: esp32s3
           ldproxy: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run host test suite
-        run: cargo test-host
+      - name: Run host tests
+        run: cargo test-host --tests

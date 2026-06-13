@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 resolver = "2"
 rust-version = "1.77"
+license = "MIT"
+description = "Synchronous JSON-RPC 2.0 GPIO control server in Rust for the ESP32-S3 (ESP-IDF)"
+repository = "https://github.com/dukov777/jsonrpc-gpio"
 
 [[bin]]
 name = "jsonrpc-gpio"

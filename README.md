@@ -46,15 +46,27 @@ for that target — there are no `host`/`s3` Cargo features to juggle.
 
 ```bash
 # Host: unit + end-to-end tests on the native target (aarch64-apple-darwin).
+# Needs no ESP-IDF / esp toolchain env.
 cargo test-host
 
 # Manual: pipe NDJSON through the host binary.
 printf '{"jsonrpc":"2.0","id":1,"method":"gpio_read","params":{"pin":2}}\n' \
   | cargo run -q
 
-# Device firmware (ESP32-S3) — see "S3 milestone" below.
-cargo build-s3
+# Device firmware (ESP32-S3). First source the esp toolchain env that espup
+# installs (provides LIBCLANG_PATH for bindgen + the toolchain in PATH); the
+# ESP-IDF itself is resolved from ESP_IDF_VERSION in .cargo/config.toml.
+. ~/export-esp.sh
+cargo build-s3            # debug
+cargo build-s3 --release  # smaller image — see BENCHMARKS.md
 ```
+
+Prerequisites for device builds: [`espup`](https://github.com/esp-rs/espup)
+(`espup install`, which creates `~/export-esp.sh`) and
+[`ldproxy`](https://github.com/esp-rs/embuild) (`cargo install ldproxy`).
+
+See [BENCHMARKS.md](BENCHMARKS.md) for roundtrip latency, flash/RAM footprint,
+and a pure-C size comparison.
 
 ## Protocol
 
@@ -161,6 +173,10 @@ attach/detach, can't run in host CI). See `src/transport/s3.rs` module docs:
 (1) boot with no host attached then attach, (2) host disconnects mid-session,
 (3) watchdog stays fed. The `is_connected()` write guard + finite timeouts that
 back these are implemented; the formal pass/fail tests are not yet scripted.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 [`embedded_io::Read`]: https://docs.rs/embedded-io
 [`embedded_io::Write`]: https://docs.rs/embedded-io
