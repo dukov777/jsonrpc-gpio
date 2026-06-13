@@ -1,6 +1,7 @@
 # jsonrpc-gpio
 
 [![host-ci](https://github.com/dukov777/jsonrpc-gpio/actions/workflows/host-ci.yml/badge.svg)](https://github.com/dukov777/jsonrpc-gpio/actions/workflows/host-ci.yml)
+[![resilience: fault-injection passing](https://img.shields.io/badge/resilience-fault--injection%20passing-brightgreen)](BENCHMARKS.md#fault-injection-resilience)
 
 A strictly synchronous, single-in-flight **JSON-RPC 2.0 GPIO control server** in
 Rust for the ESP32-S3 (ESP-IDF / `std`), with a fully host-testable core.
