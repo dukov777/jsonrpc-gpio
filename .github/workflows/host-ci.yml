@@ -1,9 +1,10 @@
-# Host-target CI: build and run the host test suite (unit + E2E) on macOS.
+# Host-target CI: build and run the host test suite (unit + E2E) on Linux.
 #
-# Runs on an Apple-Silicon runner so the host triple matches the `test-host`
-# alias (aarch64-apple-darwin). `cargo test-host --tests` runs the lib unit
-# tests + integration tests, skipping examples (so the serial benchmark's
-# `serialport` dep isn't built in CI). No `tee`, so a failure fails the job.
+# The tests are platform-agnostic, so CI runs on ubuntu-latest (1x billing,
+# faster than macOS) targeting the Linux host triple — independent of the
+# Mac-specific `test-host` alias used for local dev. `--tests` runs lib unit +
+# integration tests, skipping examples (so serial_bench's `serialport` dep isn't
+# built in CI). No `tee`, so a failure fails the job.
 name: host-ci
 
 on:
@@ -12,14 +13,13 @@ on:
 
 jobs:
   test-host:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       # Espressif Rust fork (channel = "esp"), with rust-src for build-std.
       # GITHUB_TOKEN authenticates the action's GitHub API lookup of the latest
-      # toolchain version, avoiding the unauthenticated 60 req/hr rate-limit
-      # (403 Forbidden) on shared runners.
+      # toolchain version, avoiding the unauthenticated rate-limit (403).
       - uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
@@ -29,4 +29,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run host tests
-        run: cargo test-host --tests
+        run: cargo test --target x86_64-unknown-linux-gnu --tests
