@@ -158,7 +158,7 @@ struct Cli {
     color: String,
 
     /// Seconds between reads
-    #[arg(long, default_value_t = 0.1)]
+    #[arg(long, default_value_t = 0.001)]
     interval: f64,
 }
 

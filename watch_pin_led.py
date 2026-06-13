@@ -33,7 +33,7 @@ def main() -> int:
         default="0,16,0",
         help="LED color when the pin is high (default 0,16,0 = green)",
     )
-    ap.add_argument("--interval", type=float, default=0.1, help="seconds between reads (default 0.1)")
+    ap.add_argument("--interval", type=float, default=0.001, help="seconds between reads (default 0.1)")
     args = ap.parse_args()
 
     r, g, b = (int(x) for x in args.color.split(","))
