@@ -39,7 +39,7 @@ the host with **no mock crates**.
 | `server`   | `Framer`: transport-agnostic NDJSON framing + overflow handling |
 | `dispatch` | `process_line`, the `GpioBackend` trait, host `MockGpio` |
 | `transport::host` | stdin/stdout as an `embedded_io` stream (host builds, CI, PTY) |
-| `transport::s3`   | ESP32-S3 USB Serial/JTAG (**deferred** stub, device-only) |
+| `transport::s3`   | ESP32-S3 USB Serial/JTAG (`UsbSerialDriver`, finite timeouts), the RPC port (device-only) |
 
 The host build is the native host target (no ESP-IDF). Device code is gated by
 `#[cfg(target_os = "espidf")]`, and the `esp-idf-*` crates are pulled in only
@@ -159,11 +159,30 @@ The ESP32-S3 firmware is implemented and **cross-compiles** (`cargo build-s3`
   path works. A plain `gpio_write(48, …)` can't drive it (WS2812 needs the
   ~800 kHz one-wire protocol).
 
+### Cable layout (two jobs, two cables)
+
+Each of the board's two USB connectors has one job, so RPC never shares a wire
+with logs or flashing:
+
+| Cable | Carries | How |
+|-------|---------|-----|
+| **Native USB** (USB Serial/JTAG, GPIO19/20) | **RPC only** | `S3Transport` over the on-chip USB-CDC — the fast port the shipped product exposes (~3.7 ms roundtrip) |
+| **USB-UART bridge** (UART0, GPIO43/44) | **programming + logs** | console routed to UART0; `espflash` flashes over the same cable (DTR/RTS auto-reset) |
+
+The native USB CDC is kept *pure RPC* by `CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`:
+with the console on UART0, ESP-IDF would otherwise mirror logs onto the USB
+Serial/JTAG CDC by default and bleed boot-log noise onto the RPC port. So in the
+field only the native USB is needed (a clean, fast RPC port with no log leak);
+the UART cable is a dev/factory tool. The native USB *can* also enter ROM
+download, so single-cable firmware updates remain possible if ever needed.
+
 Flash + validate (validated on an ESP32-S3 rev v0.2):
 
 ```bash
-espflash flash --port /dev/cu.usbmodemXXXX \
+# Program over the USB-UART cable (shares the logs cable; keeps native USB = RPC):
+espflash flash --port /dev/cu.wchusbserialXXXX \
   target/xtensa-esp32s3-espidf/debug/jsonrpc-gpio
+# RPC over the native USB cable:
 python3 host_client.py --port /dev/cu.usbmodemXXXX --timeout 8   # -> PASS
 ```
 
@@ -174,23 +193,22 @@ level).
 ### Device logs (console)
 
 The console (`log::info!`, panics, the bootloader banner) is routed to **UART0**
-(`CONFIG_ESP_CONSOLE_UART_DEFAULT`, GPIO43 TX / GPIO44 RX), *not* the JTAG port.
-A serial port is exclusive, so this keeps the two streams on separate cables: the
-JSON-RPC NDJSON runs over the USB Serial/JTAG port, and logs come out the external
-USB‑UART bridge — they can't fight over the port, and logging can't corrupt the
-RPC framing. With both cables attached you can monitor and drive the device at the
-same time:
+(`CONFIG_ESP_CONSOLE_UART_DEFAULT`, GPIO43 TX / GPIO44 RX) and the USB Serial/JTAG
+secondary console is disabled (`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`), so logs
+come out *only* the USB-UART bridge and the native USB CDC stays pure RPC. With
+both cables attached you can monitor and drive the device at the same time:
 
 ```bash
 # Terminal 1 — live device logs over the USB-UART bridge (Ctrl-] to exit):
 espflash monitor --port /dev/cu.wchusbserialXXXX --chip esp32s3
 
-# Terminal 2 — RPC over USB Serial/JTAG, concurrently, no port conflict:
+# Terminal 2 — RPC over the native USB cable, concurrently, no port conflict:
 python3 host_client.py --port /dev/cu.usbmodemXXXX --read 45
 ```
 
 Boot prints `cpu_start: GPIO 44 and 43 are used as console UART I/O pins`,
-followed by the app's own `jsonrpc_gpio::esp: ...` lines.
+followed by the app's own `jsonrpc_gpio::esp: ...` lines. Reading the native USB
+port while idle yields **0 bytes** — the RPC channel carries no log traffic.
 
 **Fault-injection tests** (hardware-in-the-loop, can't run in host CI) —
 `s3_fault_tests.py`, all passing on a real board:

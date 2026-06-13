@@ -4,9 +4,13 @@ Measurements taken on an **ESP32-S3** (WeAct ESP32-S3-B, rev v0.2, 16 MB flash),
 ESP-IDF v5.5.2, talking over the built-in **USB Serial/JTAG** at `/dev/cu.usbmodem101`.
 Host: Apple Silicon macOS (`aarch64-apple-darwin`).
 
-The device console (`log::info!`, panics, bootloader) is routed to **UART0**
-(GPIO43/44), separate from the JTAG port that carries the RPC stream — so log
-traffic never shares the pipe with, or perturbs, the latency measurements below.
+**Cable architecture.** Each USB connector has one job: the **native USB Serial/JTAG**
+CDC (GPIO19/20) carries RPC only, while the **USB-UART bridge** (UART0, GPIO43/44)
+carries the console *and* is the flashing port. The USB Serial/JTAG secondary
+console is disabled (`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`), so log traffic never
+shares the pipe with — or perturbs — the RPC latency measured below; the native
+port reads 0 idle bytes. Driving RPC over UART0 instead is transport-bound by the
+baud rate (~16 ms at 115200), which is why the fast native USB-CDC carries RPC.
 
 ## RPC roundtrip latency
 
