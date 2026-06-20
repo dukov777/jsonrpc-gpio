@@ -253,3 +253,7 @@ MIT — see [LICENSE](LICENSE).
 
 [`embedded_io::Read`]: https://docs.rs/embedded-io
 [`embedded_io::Write`]: https://docs.rs/embedded-io
+
+## esp32s3 board
+
+https://github.com/WeActStudio/WeActStudio.ESP32S3-AorB/blob/main/ESP32S3-B/Hardware/ESP32_S3_B_Sch%20.pdf
